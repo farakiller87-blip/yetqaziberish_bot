@@ -5,7 +5,7 @@ from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
-TOKEN = "9076151422:sAAFtJfbrLvMeSiGlBvkQ-3uJrBnX46bPBw"
+TOKEN = "9076151422:AAEihOZQsVJLVnV4xtkgTyIjZUvaY_g-wj0"
 ADMIN_ID = 6738827993
 COURIER_GROUP_ID = "@yetqaziberish"
 logging.basicConfig(level=logging.INFO)
