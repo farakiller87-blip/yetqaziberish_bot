@@ -1,4 +1,7 @@
 import logging
+import os
+import therading.Thread...
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
@@ -6,6 +9,17 @@ TOKEN = "9076151422:AAFtJfbrLvMeSiGlBvkQ-3uJrBnX46bPBws"
 ADMIN_ID = 6738827993
 COURIER_GROUP_ID = "@yetqaziberish"
 logging.basicConfig(level=logging.INFO)
+app_web = Flask(__name__)
+
+@app_web.route('/')
+def home():
+    return "Bot ishlayapdi"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app_wep.run(host="0.0.0.0", port=port)
+
+threading.Thread(target=run_web, daemon=True).start()
 
 MENU = {
     "osh": {"name": "Osh - 35000", "price": 35000},
