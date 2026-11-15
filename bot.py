@@ -320,6 +320,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(cafe_menu, pattern="^cafe_"))
     app.add_handler(CallbackQueryHandler(add_item, pattern="^add_"))
     app.add_handler(CallbackQueryHandler(confirm_cart, pattern="^confirm_cart$"))
+    app.add_handler(CallbackQueryHandler(pay_select, pattern="^pay_"))
     app.add_handler(CallbackQueryHandler(admin_action, pattern="^(accept|reject)_"))
     app.add_handler(CallbackQueryHandler(courier_toggle, pattern="^courier_toggle$"))
     app.add_handler(CallbackQueryHandler(courier_list, pattern="^courier_list$"))
