@@ -3,25 +3,21 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-COURIER_TOKEN = os.environ.get("COURIER_BOT_TOKEN")
+COURIER_CHAT_ID = -1003505074098
 
-# --- MA'LUMOTLAR ---
-# Bu yerga o'zingning restoranlaringni yoz
 RESTAURANTS = {
     "asl": {"name": "Asl Burger Yashil Bozor", "admin": 6738827993, "menu": {"Tandir Lavash": 38000, "Lavash Tovuq": 35000}},
     "daxa": {"name": "Daxa", "admin": 6738827993, "menu": {"Osh": 35000, "Cola": 12000}},
 }
 
-orders = {}  # order_id -> order info
-couriers = set()  # kuryerlar ID si
+orders = {}
+couriers = set()
 order_counter = [1]
 main_app = None
-courier_app = None
 
-# --- MIJOZ BOTI ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [[InlineKeyboardButton(r["name"], callback_data=f"cafe_{key}")] for key, r in RESTAURANTS.items()]
-    await update.message.reply_text("Qaysi kafedan buyurtma berasiz?", reply_markup=InlineKeyboardMarkup(kb))
+    await update.message.reply_text("Qaysi kafedan buyurtma berasiz?\n\nKuryer bo'lsang /kuryer deb yoz.", reply_markup=InlineKeyboardMarkup(kb))
 
 async def cafe_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -66,21 +62,20 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         order["status"] = "rejected"
         await context.bot.send_message(chat_id=order["user_id"], text="❌ Buyurtmangiz rad etildi.")
         await q.edit_message_text("❌ Rad etildi"); return
-    # QABUL QILINDI -> KURYERLARGA YUBORISH
     order["status"] = "to_courier"
     r = RESTAURANTS[order["cafe"]]
     await q.edit_message_text(f"✅ Buyurtma #{oid} qabul qilindi. Kuryerlarga yuborildi.")
     await context.bot.send_message(chat_id=order["user_id"], text="✅ Buyurtmangiz tasdiqlandi! Kuryer qidirilmoqda...")
-    # --- BOG'LANISH JOYI: Kuryer boti orqali hamma kuryerga ---
     ctext = f"🚨 YANGI BUYURTMA #{oid}!\n\n🏪 {r['name']}\n👤 Mijoz: {order['name']}\n💰 {order['total']} so'm\n\nKim birinchi olsa - oshaniki!"
     ckb = InlineKeyboardMarkup([[InlineKeyboardButton("🏃 MEN OLAMAN", callback_data=f"take_{oid}")]])
+    try:
+        await context.bot.send_message(chat_id=COURIER_CHAT_ID, text=ctext, reply_markup=ckb)
+    except Exception as e:
+        print(f"Kanalga yuborishda xato: {e}")
     for cid in list(couriers):
-        try: await courier_app.bot.send_message(chat_id=cid, text=ctext, reply_markup=ckb)
+        try: await context.bot.send_message(chat_id=cid, text=ctext, reply_markup=ckb)
         except: pass
-    if not couriers:
-        await context.bot.send_message(chat_id=r["admin"], text="⚠️ Hozircha ro'yxatdan o'tgan kuryer yo'q! Kuryer @yetqaziberish botiga /start bossin.")
 
-# --- KURYER BOTI ---
 async def courier_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     couriers.add(update.effective_user.id)
     await update.message.reply_text("🚴 Salom Kuryer!\n\nRo'yxatga olinding ✅\nYangi buyurtma tushishi bilan shu yerga keladi. Kutib tur.")
@@ -93,32 +88,31 @@ async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("Bu buyurtma allaqachon olingan!"); return
     order["status"] = "taken"; order["courier_id"] = q.from_user.id
     await q.edit_message_text(f"✅ Buyurtma #{oid} seniki!\n\nYetkazib bo'lgach pastni bos:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ YETKAZDIM", callback_data=f"done_{oid}")]]))
-    await main_app.bot.send_message(chat_id=order["user_id"], text=f"🚴 Kuryer yo'lga chiqdi! Buyurtmangiz #{oid} yo'lda.")
+    await context.bot.send_message(chat_id=order["user_id"], text=f"🚴 Kuryer yo'lga chiqdi! Buyurtmangiz #{oid} yo'lda.")
 
 async def courier_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     oid = int(q.data.split("_")[1])
     order = orders.get(oid)
+    if not order: return
     order["status"] = "done"
     await q.edit_message_text(f"✅ Buyurtma #{oid} yetkazildi. Rahmat!")
-    await main_app.bot.send_message(chat_id=order["user_id"], text=f"✅ Buyurtmangiz #{oid} yetkazildi! Yoqimli ishtaha 😋")
+    await context.bot.send_message(chat_id=order["user_id"], text=f"✅ Buyurtmangiz #{oid} yetkazildi! Yoqimli ishtaha 😋")
 
 async def main():
-    global main_app, courier_app
-    main_app = Application.builder().token(BOT_TOKEN).build()
-    main_app.add_handler(CommandHandler("start", start))
-    main_app.add_handler(CallbackQueryHandler(cafe_menu, pattern="^cafe_"))
-    main_app.add_handler(CallbackQueryHandler(add_item, pattern="^add_"))
-    main_app.add_handler(CallbackQueryHandler(confirm, pattern="^confirm$"))
-    main_app.add_handler(CallbackQueryHandler(admin_action, pattern="^(accept|reject)_"))
-    courier_app = Application.builder().token(COURIER_TOKEN).build()
-    courier_app.add_handler(CommandHandler("start", courier_start))
-    courier_app.add_handler(CallbackQueryHandler(courier_take, pattern="^take_"))
-    courier_app.add_handler(CallbackQueryHandler(courier_done, pattern="^done_"))
-    await asyncio.gather(main_app.initialize(), courier_app.initialize())
-    await asyncio.gather(main_app.start(), courier_app.start())
-    await asyncio.gather(main_app.updater.start_polling(), courier_app.updater.start_polling())
-    await asyncio.Event().wait()
+    global main_app
+    app = Application.builder().token(BOT_TOKEN).build()
+    main_app = app
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("kuryer", courier_start))
+    app.add_handler(CallbackQueryHandler(cafe_menu, pattern="^cafe_"))
+    app.add_handler(CallbackQueryHandler(add_item, pattern="^add_"))
+    app.add_handler(CallbackQueryHandler(confirm, pattern="^confirm$"))
+    app.add_handler(CallbackQueryHandler(admin_action, pattern="^(accept|reject)_"))
+    app.add_handler(CallbackQueryHandler(courier_take, pattern="^take_"))
+    app.add_handler(CallbackQueryHandler(courier_done, pattern="^done_"))
+    print("Bot ishga tushdi...")
+    await app.run_polling()
 
 if __name__ == "__main__":
     asyncio.run(main())
