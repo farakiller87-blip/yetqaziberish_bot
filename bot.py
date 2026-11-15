@@ -99,10 +99,8 @@ async def courier_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.edit_message_text(f"✅ Buyurtma #{oid} yetkazildi. Rahmat!")
     await context.bot.send_message(chat_id=order["user_id"], text=f"✅ Buyurtmangiz #{oid} yetkazildi! Yoqimli ishtaha 😋")
 
-async def main():
-    global main_app
+def main():
     app = Application.builder().token(BOT_TOKEN).build()
-    main_app = app
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("kuryer", courier_start))
     app.add_handler(CallbackQueryHandler(cafe_menu, pattern="^cafe_"))
@@ -112,7 +110,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(courier_take, pattern="^take_"))
     app.add_handler(CallbackQueryHandler(courier_done, pattern="^done_"))
     print("Bot ishga tushdi...")
-    await app.run_polling()
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
