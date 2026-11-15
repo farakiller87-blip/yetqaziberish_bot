@@ -266,21 +266,26 @@ async def courier_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"✅ #{oid} yetkazildi. Kuryer: {DB['users'][uid]['name']}")
 
 async def on_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query; await q.answer()
-    # rate_5_1 -> 5 yulduz, buyurtma 1
-    parts = str(q.data).split("_")
-    stars = (parts[1]); oid = (parts[2])
-    order = DB["orders"].get(oid)
-    if not order: return
-
-    courier_id = order.get("courier_id") or order.get("courier")
-    courier_name = DB["users"].get(str(courier_id), {}).get("name", "Noma'lum") if courier_id else "Noma'lum"
-
-    if "ratings" not in DB: DB["ratings"] = []
-    DB["ratings"].append({"order_id": oid, "courier": courier_name, "courier_id": str(courier_id), "stars": stars, "user": q.from_user.first_name})
-    save()
-
-    await q.edit_message_text(f"Rahmat! Bahoyingiz saqlandi: {'⭐'*stars}\n✅ #{oid} yetkazildi. Kuryer: {courier_name}")
+    q = update.callback_query
+    await q.answer()
+    try:
+        parts = str(q.data).split("_")
+        stars = int(parts[1]); oid = parts[2]
+        order = DB["orders"].get(oid)
+        if not order:
+            # kalit int bo'lsa ham tekshiramiz
+            order = DB["orders"].get(int(oid)) if oid.isdigit() else None
+        if not order:
+            await q.edit_message_text(f"Buyurtma topilmadi. oid={oid}")
+            return
+        courier_name = order.get("courier_name") or order.get("courier") or "Kuryer"
+        if "ratings" not in DB: DB["ratings"] = []
+        DB["ratings"].append({"order_id": oid, "courier": str(courier_name), "stars": stars, "user": q.from_user.first_name})
+        save()
+        await q.edit_message_text(f"Rahmat! Bahoyingiz saqlandi: {'⭐'*stars}\n✅ #{oid} yetkazildi. Kuryer: {courier_name}")
+    except Exception as e:
+        print("RATE ERROR:", e)
+        await q.edit_message_text(f"Xato bo'ldi: {e}")
 async def reyting(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ratings = DB.get("ratings", [])
     if not ratings:
