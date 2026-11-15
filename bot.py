@@ -27,7 +27,7 @@ def load():
         with open(DB_FILE, "r", encoding="utf-8") as f: return json.load(f)
     except: return {"users": {}, "restaurants": {
         "asl": {"name": "Asl Burger Yashil Bozor", "admin": 6738827993, "menu": {"Tandir Lavash": 38000, "Lavash Tovuq": 35000}, "active": True},
-        "daxa": {"name": "Daxa", "admin": 6738827993, "menu": {"Osh": 35000, "Cola": 12000}, "active": True}
+        "asl 5 kichik daxa": {"name": "Asl Burger 5 kichik Daxa", "admin": 6738827993, "menu": {"Osh": 35000, "Cola": 12000}, "active": True}
     }, "orders": {}, "counter": 1}
 
 def save():
@@ -165,7 +165,9 @@ async def on_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_main(update, update.effective_user.id)
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get("step") != "address": return
+    if context.user_data.get("step") != "address":
+         await show_main(update, update.effective_user.id, "🏠 Asosiy menyu:")
+        return
     address = update.message.text
     cart = context.user_data.get("cart", []); cafe_key = context.user_data.get("cafe")
     total = sum(p for _, p in cart) + 15000
@@ -292,6 +294,12 @@ async def generic_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("Bu bo'lim tez orada... Hozircha Admin paneldan ko'r.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
 
 import asyncio
+async def on_location(update, context):
+    if not update.message.location:
+        return
+    loc = update.message.location
+    update.message.text = f"📍 Lokatsiya: https://maps.google.com/?q={loc.latitude},{loc.longitude}"
+    await on_text(update, context)
 
 async def main():
     app = Application.builder().token(BOT_TOKEN).build()
@@ -312,6 +320,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(generic_back, pattern="^(back_main|client_my|courier_my|courier_balance|admin_orders|rest_orders|admin_couriers|admin_users|admin_rests|rest_menu|rest_stats)$"))
     app.add_handler(MessageHandler(filters.CONTACT, on_contact))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+    app.add_handler(MessageHandler(filters.LOCATION, on_location))
     print("Yandex-style bot ishga tushdi...")
     await app.initialize()
     await app.start()
