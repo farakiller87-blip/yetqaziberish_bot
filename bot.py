@@ -176,7 +176,7 @@ async def on_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("step") != "address":
          await show_main(update, update.effective_user.id, "🏠 Asosiy menyu:")
-        return
+         return
     address = update.message.text
     cart = context.user_data.get("cart", []); cafe_key = context.user_data.get("cafe")
     total = sum(p for _, p in cart) + 15000
