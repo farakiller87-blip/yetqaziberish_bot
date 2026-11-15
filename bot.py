@@ -265,6 +265,33 @@ async def courier_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=order["user_id"], text=f"✅ Buyurtmangiz #{oid} yetkazildi! Yoqimli ishtaha 😋\n\nKuryerni baholang:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⭐️⭐️⭐️⭐️⭐️", callback_data=f"rate_5_{oid}"), InlineKeyboardButton("⭐️⭐️⭐️", callback_data=f"rate_3_{oid}")]]))
     await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"✅ #{oid} yetkazildi. Kuryer: {DB['users'][uid]['name']}")
 
+async def on_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    # rate_5_1 -> 5 yulduz, buyurtma 1
+    parts = str(q.data).split("_")
+    stars = (parts[1]); oid = (parts[2])
+    order = DB["orders"].get(oid)
+    if not order: return
+
+    courier_id = order.get("courier_id") or order.get("courier")
+    courier_name = DB["users"].get(str(courier_id), {}).get("name", "Noma'lum") if courier_id else "Noma'lum"
+
+    if "ratings" not in DB: DB["ratings"] = []
+    DB["ratings"].append({"order_id": oid, "courier": courier_name, "courier_id": str(courier_id), "stars": stars, "user": q.from_user.first_name})
+    save()
+
+    await q.edit_message_text(f"Rahmat! Bahoyingiz saqlandi: {'⭐'*stars}\n✅ #{oid} yetkazildi. Kuryer: {courier_name}")
+async def reyting(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ratings = DB.get("ratings", [])
+    if not ratings:
+        await update.message.reply_text("Hali baho yo'q.")
+        return
+    text = "📊 Barcha baholar:\n\n"
+    for r in ratings[-20:]:
+        text += f"#{r['order_id']} — {r['courier']} — {'⭐'*r['stars']} — {r['user']}\n"
+    avg = sum(r['stars'] for r in ratings) / len(ratings)
+    text += f"\nO'rtacha: {avg:.1f} ⭐ | Jami: {len(ratings)} ta"
+    await update.message.reply_text(text)
 # --- ADMIN PANEL ---
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -314,6 +341,7 @@ async def on_location(update, context):
 async def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("reyting", reyting))
     app.add_handler(CallbackQueryHandler(set_role, pattern="^setrole_"))
     app.add_handler(CallbackQueryHandler(change_role, pattern="^change_role$"))
     app.add_handler(CallbackQueryHandler(client_order, pattern="^client_order$"))
@@ -326,6 +354,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(courier_list, pattern="^courier_list$"))
     app.add_handler(CallbackQueryHandler(courier_take, pattern="^take_"))
     app.add_handler(CallbackQueryHandler(courier_done, pattern="^done_"))
+    app.add_handler(CallbackQueryHandler(on_rate, pattern="^rate_"))
     app.add_handler(CallbackQueryHandler(admin_stats, pattern="^admin_stats$"))
     app.add_handler(CallbackQueryHandler(generic_back, pattern="^(back_main|client_my|courier_my|courier_balance|admin_orders|rest_orders|admin_couriers|admin_users|admin_rests|rest_menu|rest_stats)$"))
     app.add_handler(MessageHandler(filters.CONTACT, on_contact))
