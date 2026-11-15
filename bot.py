@@ -277,7 +277,9 @@ async def generic_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif q.data in ["rest_menu","rest_stats"]:
         await q.edit_message_text("Bu bo'lim tez orada... Hozircha Admin paneldan ko'r.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
 
-def main():
+import asyncio
+
+async def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(set_role, pattern="^setrole_"))
@@ -291,12 +293,20 @@ def main():
     app.add_handler(CallbackQueryHandler(courier_list, pattern="^courier_list$"))
     app.add_handler(CallbackQueryHandler(courier_take, pattern="^take_"))
     app.add_handler(CallbackQueryHandler(courier_done, pattern="^done_"))
+    app.add_handler(CallbackQueryHandler(courier_done, pattern="^done_"))
     app.add_handler(CallbackQueryHandler(admin_stats, pattern="^admin_stats$"))
     app.add_handler(CallbackQueryHandler(generic_back, pattern="^(back_main|client_my|courier_my|courier_balance|admin_orders|rest_orders|admin_couriers|admin_users|admin_rests|rest_menu|rest_stats)$"))
     app.add_handler(MessageHandler(filters.CONTACT, on_contact))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     print("Yandex-style bot ishga tushdi...")
-    app.run_polling()
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    # Botni to'xtamasdan ushlab turamiz
+    await asyncio.Event().wait()
+
+if __name__ == "__main__":
+    asyncio.run(main())
 
 if __name__ == "__main__":
     main()
