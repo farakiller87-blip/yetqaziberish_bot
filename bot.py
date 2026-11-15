@@ -202,11 +202,11 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     order = DB["orders"].get(oid)
     if not order: await q.answer("Topilmadi"); return
     if action == "reject":
-    order["status"] = "rejected"; save()
-    await context.bot.send_message(chat_id=order["user_id"], text=f"❌ Buyurtma #{oid} rad etildi.")
-    rname = DB['restaurants'][order['cafe']]['name']
-    await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"❌ Buyurtma #{oid} RAD ETILDI\nRestoran: {rname}")
-    await q.edit_message_text("❌ Rad etildi"); return
+        order["status"] = "rejected"; save()
+        await context.bot.send_message(chat_id=order["user_id"], text=f"❌ Buyurtma #{oid} rad etildi.")
+        rname = DB['restaurants'][order['cafe']]['name']
+        await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"❌ Buyurtma #{oid} RAD ETILDI\nRestoran: {rname}")
+        await q.edit_message_text("❌ Rad etildi"); return
     order["status"] = "to_courier"; save()
     r = DB["restaurants"][order["cafe"]]
     await q.edit_message_text(f"✅ Buyurtma #{oid} qabul qilindi. Kuryerlarga yuborildi.")
