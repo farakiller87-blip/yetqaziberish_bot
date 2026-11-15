@@ -4,7 +4,7 @@ from threading import Thread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 
-TOKEN = os.environ.get("9076151422:AAEihOZQsVJLVnV4xtkgTyIjZUvaY_g-wj0")
+TOKEN = os.environ.get("BOT_TOKEN")
 
 # ========== RESTORANLAR + CLICK KARTALAR (TEST) ==========
 RESTAURANTS = {
