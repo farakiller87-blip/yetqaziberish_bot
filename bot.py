@@ -248,7 +248,7 @@ async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
     order = DB["orders"].get(oid)
     if not order or order["status"] != "to_courier":
         await q.answer("Bu buyurtma allaqachon olingan!"); return
-    order["status"] = "taken"; order["courier_id"] = q.from_user.id; save()
+    order["status"] = "taken"; order["courier_id"] = q.from_user.id; order["courier_name"] = q.from_user.first_name; save()
     u = DB["users"][str(q.from_user.id)]
     await q.edit_message_text(f"✅ Buyurtma #{oid} seniki!\n\n📍 Manzil: {order['address']}\n📞 Mijoz: {order['phone']}\n💰 {order['total']} so'm\n\nYetkazib bo'lgach pastni bos:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ YETKAZDIM", callback_data=f"done_{oid}")]]))
     await context.bot.send_message(chat_id=order["user_id"], text=f"🚴 Kuryer {u['name']} yo'lga chiqdi! Buyurtma #{oid} yo'lda.")
