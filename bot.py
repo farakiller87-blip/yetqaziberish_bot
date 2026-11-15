@@ -308,7 +308,7 @@ async def on_location(update, context):
     if not update.message.location:
         return
     loc = update.message.location
-    update.message.text = f"📍 Lokatsiya: https://maps.google.com/?q={loc.latitude},{loc.longitude}"
+    object.__setattr__(update.message, "text", f"📍 Lokatsiya: https://maps.google.com/?q={loc.latitude},{loc.longitude}")
     await on_text(update, context)
 
 async def main():
@@ -326,7 +326,6 @@ async def main():
     app.add_handler(CallbackQueryHandler(courier_list, pattern="^courier_list$"))
     app.add_handler(CallbackQueryHandler(courier_take, pattern="^take_"))
     app.add_handler(CallbackQueryHandler(courier_done, pattern="^done_"))
-    app.add_handler(CallbackQueryHandler(courier_done, pattern="^done_"))
     app.add_handler(CallbackQueryHandler(admin_stats, pattern="^admin_stats$"))
     app.add_handler(CallbackQueryHandler(generic_back, pattern="^(back_main|client_my|courier_my|courier_balance|admin_orders|rest_orders|admin_couriers|admin_users|admin_rests|rest_menu|rest_stats)$"))
     app.add_handler(MessageHandler(filters.CONTACT, on_contact))
@@ -342,5 +341,3 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 
-if __name__ == "__main__":
-    main()
