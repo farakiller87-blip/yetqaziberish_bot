@@ -11,7 +11,7 @@ def home():
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
-app.run(host="0.0.0.0", port=port, use_reloader=False)
+    app.run(host="0.0.0.0", port=port, use_reloader=False)
 Thread(target=run_flask, daemon=True).start()
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
