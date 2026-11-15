@@ -1,4 +1,5 @@
 import os
+import asyncio
 from flask import Flask
 from threading import Thread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
@@ -195,7 +196,9 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except: await q.edit_message_text(q.message.text + "\n\n❌ RAD ETILDI", parse_mode="Markdown")
 
 def main():
-    Thread(target=lambda: app_flask.run(host="0.0.0.0", port=10000)).start()
+    Thread(target=lambda: app_flask.run(host="0.0.0.0", port=10000), daemon=True).start()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     application = Application.builder().token(TOKEN).build()
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
