@@ -161,13 +161,14 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["step"] = "address"
     await q.message.reply_text("📍 Manzilingizni yozing (Masalan: Yashil Bozor, 5-uy):", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📍 Lokatsiya yuborish", request_location=True)]], resize_keyboard=True, one_time_keyboard=True))
 async def on_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message.contact: return
+    if not update.message.contact: 
+        return
     uid = str(update.effective_user.id)
     DB["users"][uid]["phone"] = update.message.contact.phone_number; save()
     if context.user_data.get("step") == "phone":
-    context.user_data["step"] = "payment"
-    await update.message.reply_text("💳 To'lov turini tanlang:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💵 Naqd", callback_data="pay_naqd"), InlineKeyboardButton("💳 Click", callback_data="pay_click")]]))
-    return
+        context.user_data["step"] = "payment"
+        await update.message.reply_text("💳 To'lov turini tanlang:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💵 Naqd", callback_data="pay_naqd"), InlineKeyboardButton("💳 Click", callback_data="pay_click")]]))
+        return
     elif context.user_data.get("step") == "courier_phone":
         await update.message.reply_text("✅ Kuryer sifatida ro'yxatdan o'tding! Endi ONLINE bo'l.")
         await show_main(update, update.effective_user.id)
