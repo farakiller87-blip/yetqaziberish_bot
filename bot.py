@@ -152,14 +152,22 @@ async def confirm_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.edit_message_text("📞 Telefon raqamingizni yuboring:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📞 Raqamni yuborish", callback_data="send_phone_btn")]]))
     # Telefonni contact orqali olish uchun Reply tugma
     await q.message.reply_text("Pastdagi tugmani bosib raqamingizni yuboring 👇", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📞 Raqamni yuborish", request_contact=True)]], resize_keyboard=True, one_time_keyboard=True))
-
+async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    if q.data == "pay_naqd":
+        context.user_data["payment"] = "Naqd 💵"
+    else:
+        context.user_data["payment"] = "Click 💳"
+    context.user_data["step"] = "address"
+    await q.message.reply_text("📍 Manzilingizni yozing (Masalan: Yashil Bozor, 5-uy):", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📍 Lokatsiya yuborish", request_location=True)]], resize_keyboard=True, one_time_keyboard=True))
 async def on_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.contact: return
     uid = str(update.effective_user.id)
     DB["users"][uid]["phone"] = update.message.contact.phone_number; save()
     if context.user_data.get("step") == "phone":
-        context.user_data["step"] = "address"
-        await update.message.reply_text("📍 Manzilingizni yozing (masalan: Yashil Bozor, 12-dom, 5-kv):", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📍 Lokatsiya yuborish", callback_data="send_loc_btn")]]))
+    context.user_data["step"] = "payment"
+    await update.message.reply_text("💳 To'lov turini tanlang:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💵 Naqd", callback_data="pay_naqd"), InlineKeyboardButton("💳 Click", callback_data="pay_click")]]))
+    return
     elif context.user_data.get("step") == "courier_phone":
         await update.message.reply_text("✅ Kuryer sifatida ro'yxatdan o'tding! Endi ONLINE bo'l.")
         await show_main(update, update.effective_user.id)
@@ -173,13 +181,14 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total = sum(p for _, p in cart) + 15000
     oid = DB["counter"]; DB["counter"] += 1
     uid = str(update.effective_user.id)
-    DB["orders"][str(oid)] = {"id": oid, "cafe": cafe_key, "cart": cart, "total": total, "user_id": int(uid), "name": DB["users"][uid]["name"], "phone": DB["users"][uid].get("phone",""), "address": address, "status": "waiting", "courier_id": None, "created": "now"}
+    payment = context.user_data.get("payment", "Naqd 💵")
+    DB["orders"][str(oid)] = {"id": oid, "cafe": cafe_key, "cart": cart, "total": total, "payment": payment, "user_id": int(uid), "name": DB["users"][uid]["name"], "phone": DB["users"][uid].get("phone",""), "address": address, "status": "waiting", "courier_id": None, "created": "now"}
     save()
     context.user_data["step"] = None
     r = DB["restaurants"][cafe_key]
     text = f"🔥 YANGI BUYURTMA #{oid}!\n\n🏪 {r['name']}\n👤 {DB['users'][uid]['name']} | 📞 {DB['users'][uid].get('phone')}\n📍 {address}\n"
     for n, p in cart: text += f"🛒 {n} - {p}\n"
-    text += f"\n🚗 Yetkazib berish: 15000\n💰 JAMI: {total} so'm | 💵 Naqd"
+    text += f"\n🚗 Yetkazib berish: 15000\n💰 JAMI: {total} so'm | {payment}"
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ QABUL QILISH", callback_data=f"accept_{oid}"), InlineKeyboardButton("❌ RAD ETISH", callback_data=f"reject_{oid}")]])
     await context.bot.send_message(chat_id=r["admin"], text=text, reply_markup=kb)
     await context.bot.send_message(chat_id=SUPER_ADMIN, text=text)
