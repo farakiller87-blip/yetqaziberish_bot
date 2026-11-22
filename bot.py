@@ -2278,13 +2278,15 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     taken = len([o for o in orders if o.get("status") == "taken"])
     online = len([u for u in DB["users"].values() if u.get("locked_role") == "courier" and u.get("online")])
     total_client_bal = sum(u.get("client_balance", 0) for u in DB["users"].values())
-    text = f"👑 *ADMIN PANEL*\n\n📦 Buyurtma: jami {len(orders)} ta\n⏳ Kutilmoqda: {waiting} ta | 🚴 Yo'lda: {taken} ta | ✅ Yetkazilgan: {today_done} ta\n🚴 Online kuryer: {online} ta\n💰 Mijozlar hisobida jami: {total_client_bal:,} so'm\n🏪 Restoran: {len(DB['restaurants'])} ta | 👥 Foydalanuvchi: {len(DB['users'])} ta\n\n📱 Telefon + 💻 Kompyuter - ikkalasida ham shu panel.\nMa'lumot serverda, qurilmada emas."
+    text = f"👑 *ADMIN PANEL*\n\n📦 Buyurtma: jami {len(orders)} ta\n⏳ Kutilmoqda: {waiting} ta | 🚴 Yo'lda: {taken} ta | ✅ Yetkazilgan: {today_done} ta\n🚴 Online kuryer: {online} ta\n💰 Mijozlar hisobida jami: {total_client_bal:,} so'm\n🏪 Restoran: {len(DB['restaurants'])} ta | 🛒 Do'kon: {len(DB.get('groceries', {}))} ta | 👥 Foydalanuvchi: {len(DB['users'])} ta\n\n📱 Telefon + 💻 Kompyuter - ikkalasida ham shu panel.\nMa'lumot serverda, qurilmada emas."
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("📦 Buyurtmalar", callback_data="admin_orders")],
         [InlineKeyboardButton("🧾 Hisob to'ldirish - chek keldi", callback_data="admin_topups_info")],
         [InlineKeyboardButton("🚴 Kuryerlar", callback_data="admin_couriers")],
         [InlineKeyboardButton("👥 Mijozlar + Hisoblari", callback_data="admin_users")],
         [InlineKeyboardButton("🏪 Restoranlar", callback_data="admin_rests")],
+        [InlineKeyboardButton("🛒 Oziq-ovqat do'konlari", callback_data="admin_grocs")],
+        [InlineKeyboardButton("💰 Restoranlar qarzi (faqat senga)", callback_data="admin_debt_report")],
         [InlineKeyboardButton("📊 Statistika", callback_data="admin_stats")],
         [InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")],
     ])
@@ -2336,8 +2338,19 @@ async def generic_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
     elif q.data in ["admin_orders","rest_orders"]:
         if q.data == "admin_orders" and q.from_user.id != SUPER_ADMIN: await q.answer("Faqat admin", show_alert=True); return
-        txt = "📦 *Oxirgi buyurtmalar:*\n\n" + "\n".join([f"#{o['id']} | {o.get('status')} | {o.get('total',0):,} so'm | {o.get('name','')} | {(o.get('address','') or '')[:25]}" for o in list(DB["orders"].values())[-10:]]) if DB["orders"] else "Hali buyurtma yo'q"
-        await send_new_window(update, context, txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Admin panel", callback_data="admin_panel")]]))
+        _is_admin = q.from_user.id == SUPER_ADMIN
+        _my_rest_keys = [k for k,v in DB["restaurants"].items() if v.get("admin")==q.from_user.id]
+        _my_groc_keys = [k for k,v in DB.get("groceries", {}).items() if v.get("admin")==q.from_user.id]
+        if _is_admin:
+            _ords = list(DB["orders"].values())[-10:]; _back = [[InlineKeyboardButton("⬅️ Admin panel", callback_data="admin_panel")]]; _title = "📦 *Oxirgi buyurtmalar (hammasi):*"
+        elif _my_groc_keys:
+            _ords = [o for o in DB["orders"].values() if o.get("cafe") in _my_groc_keys][-10:]; _back = [[InlineKeyboardButton("🛒 Do'kon paneliga qaytish", callback_data="groc_panel")]]; _title = "📦 *Sening do'koning buyurtmalari:*"
+        elif _my_rest_keys:
+            _ords = [o for o in DB["orders"].values() if o.get("cafe") in _my_rest_keys][-10:]; _back = [[InlineKeyboardButton("🏪 Restoran paneliga qaytish", callback_data="rest_panel")]]; _title = "📦 *Sening restoraning buyurtmalari:*"
+        else:
+            _ords = []; _back = [[InlineKeyboardButton("⬅️ Asosiy", callback_data="back_main")]]; _title = "📦 *Buyurtmalar:*"
+        txt = _title + "\n\n" + "\n".join([f"#{o['id']} | {o.get('status')} | {o.get('total',0):,} so'm | {o.get('name','')} | {(o.get('address','') or '')[:25]}" for o in _ords]) if _ords else "Hali buyurtma yo'q"
+        await send_new_window(update, context, txt, reply_markup=InlineKeyboardMarkup(_back))
     elif q.data == "admin_couriers":
         if q.from_user.id != SUPER_ADMIN: await q.answer("Faqat admin", show_alert=True); return
         txt = "🚴 *Kuryerlar:*\n\n" + "\n".join([f"{u.get('name')} | {'🟢 ONLINE' if u.get('online') else '🔴 OFFLINE'} | Yetkazgan: {u.get('delivered',0)} ta | Hisob: {u.get('balance',0):,} so'm | 📞 {u.get('phone','-')}" for u in DB["users"].values() if u.get("locked_role")=="courier"]) or "Hali kuryer yo'q"
