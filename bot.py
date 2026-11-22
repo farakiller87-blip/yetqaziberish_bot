@@ -46,12 +46,13 @@ def load():
         "coffee": {"name": "Coffee Truck", "admin": 6738827993, "delivery": 10000, "menu": {"Kofe": 18000, "Kapuchino": 22000, "Latte": 24000, "Kruassan": 15000}, "active": True},
         "yapo": {"name": "Yapo Sushi", "admin": 6738827993, "delivery": 15000, "menu": {"Sushi set": 85000, "Roll": 45000, "Ramen": 48000, "Miso shorva": 20000}, "active": True},
         "aqilli": {"name": "Aqilli bekat", "admin": 6738827993, "delivery": 8000, "menu": {"Kofe": 15000, "Choy": 6000, "Sendvich": 20000, "Shirinlik": 18000}, "active": True}
-    }, "orders": {}, "counter": 1}
+    }, "groceries": {}, "orders": {}, "counter": 1}
 
 def save():
     with open(DB_FILE, "w", encoding="utf-8") as f: json.dump(DB, f, ensure_ascii=False, indent=2)
 
 DB = load()
+if "groceries" not in DB: DB["groceries"] = {}; save()
 # --- MIGRATSIYA: eski db.json bo'lsa ham yangi 9 ta oshxonani qo'shadi ---
 _NEW_RESTS = {
     "diplomat": {"name": "Diplomat Restaurant", "admin": 6738827993, "delivery": 15000, "menu": {"Shashlik": 45000, "Osh": 38000, "Lagman": 32000, "Pizza": 65000, "Shorva": 28000}, "active": True},
@@ -509,6 +510,13 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["step"] = None
         await update.message.reply_text(f"✅ Rasm saqlandi!\n\n{_dish_emoji(_dish)} {_dish} - endi mijozlar menyuda rasmi bilan ko'radi 📸", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏪 Panelga qaytish", callback_data="rest_panel")]]))
         return
+    if context.user_data.get("step") == "groc_photo_val":
+        key, r = _my_groc(update.effective_user.id)
+        if not r: await update.message.reply_text("Do'kon topilmadi."); context.user_data["step"] = None; return
+        _prod = context.user_data.get("photo_product", "")
+        _fid = update.message.photo[-1].file_id
+        r.setdefault("menu_photos", {})[_prod] = _fid; save(); context.user_data["step"] = None
+        await update.message.reply_text(f"✅ Rasm saqlandi!\n\n{_groc_emoji(_prod)} {_prod} - endi mijozlar do'konda rasmi bilan ko'radi 📸", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Panelga qaytish", callback_data="groc_panel")]])); return
     await update.message.reply_text("📸 Rasm qabul qilindi! Agar taomga rasm qo'shmoqchi bo'lsangiz - Restoran panel → 📸 Taomga rasm qo'shish ni bosing.")
 
 async def rest_delivery_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1034,6 +1042,53 @@ def _dish_emoji(name: str) -> str:
     if "non" in n: return "🍞"
     return "🍽️"
 
+def _groc_emoji(name: str) -> str:
+    n = name.lower()
+    if "sut" in n or "moloko" in n or "qatiq" in n or "tvorog" in n: return "🥛"
+    if "non" in n or "bulka" in n or "xleb" in n: return "🍞"
+    if "tuxum" in n or "yayso" in n: return "🥚"
+    if "olma" in n or "apple" in n: return "🍎"
+    if "banan" in n: return "🍌"
+    if "kartoshka" in n: return "🥔"
+    if "piyoz" in n: return "🧅"
+    if "sabzi" in n: return "🥕"
+    if "gosht" in n or "mol" in n or "tovuq" in n: return "🥩"
+    if "guruch" in n or "ris" in n: return "🍚"
+    if "makaron" in n: return "🍝"
+    if "yog'" in n or "yog" in n or "saryog" in n: return "🧈"
+    if "shakar" in n or "saxar" in n: return "🍬"
+    if "choy" in n: return "🍵"
+    if "kofe" in n: return "☕"
+    if "suv" in n or "cola" in n or "sharbat" in n: return "🥤"
+    if "shokolad" in n or "konfet" in n: return "🍫"
+    if "pampers" in n or "taglik" in n: return "👶"
+    if "sovun" in n or "shampun" in n: return "🧴"
+    return "🛒"
+
+def _my_groc(uid):
+    for k, r in DB.get("groceries", {}).items():
+        if r.get("admin") == uid: return k, r
+    return None, None
+
+def _groc_kb(r, cart):
+    _sold = set(r.get("sold_out", []))
+    kb = []
+    for n, pr in r["menu"].items():
+        _pr = pr.get("price", pr) if isinstance(pr, dict) else pr
+        _em = _groc_emoji(n)
+        if n in _sold:
+            kb.append([InlineKeyboardButton(f"❌ {_em} {n} - Tugadi", callback_data="sold_out_noop")])
+        else:
+            kb.append([InlineKeyboardButton(f"{_em} {n} - {_pr:,} so'm", callback_data=f"gadd_{n}_{_pr}")])
+    total = sum(pr for _, pr in cart)
+    if cart:
+        kb.append([InlineKeyboardButton(f"🛒 Savatni ko'rish ({len(cart)} ta - {total:,} so'm)", callback_data="cart_view")])
+        kb.append([InlineKeyboardButton("✅ Savatni tasdiqlash", callback_data="confirm_cart")])
+    else:
+        kb.append([InlineKeyboardButton("🛒 Savat bo'sh", callback_data="cart_view")])
+    kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="groc_list")])
+    return InlineKeyboardMarkup(kb)
+
 def _menu_kb(r, cart):
     _sold = set(r.get("sold_out", []))
     kb = []
@@ -1108,11 +1163,244 @@ async def client_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if _u_co.get("locked_role") and _u_co.get("locked_role") != "client":
         await send_new_window(update, context, locked_msg(_u_co.get("locked_role")), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
         return
-    kb = [[InlineKeyboardButton(r["name"], callback_data=f"cafe_{key}")] for key, r in DB["restaurants"].items() if r.get("active")]
-    kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")])
+    kb = [[InlineKeyboardButton("🍔 Restoranlar", callback_data="rest_list")], [InlineKeyboardButton("🛒 Oziq-ovqat do'konlari", callback_data="groc_list")], [InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]
     try: await q.message.delete()
     except: pass
-    await context.bot.send_message(chat_id=q.from_user.id, text="Qaysi restorandan buyurtma berasiz?", reply_markup=InlineKeyboardMarkup(kb))
+    await context.bot.send_message(chat_id=q.from_user.id, text="Qayerdan buyurtma berasiz? 👇\n\n🍔 Restoranlar - tayyor taomlar\n🛒 Oziq-ovqat - do'kon mahsulotlari", reply_markup=InlineKeyboardMarkup(kb))
+
+
+# ============ 🛒 OZIQ-OVQAT DO'KONLARI - RESTORAN PANELI KABI ============
+async def rest_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    kb = [[InlineKeyboardButton(f"🏪 {r['name']}", callback_data=f"cafe_{key}")] for key, r in DB["restaurants"].items() if r.get("active")]
+    kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="client_order")])
+    await send_new_window(update, context, "🍔 *Restoranlar:*\n\nQaysi restorandan buyurtma berasiz?", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+
+async def groc_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    _gs = [(k, r) for k, r in DB.get("groceries", {}).items() if r.get("active") and r.get("approved", True)]
+    if not _gs:
+        await send_new_window(update, context, "🛒 *Oziq-ovqat do'konlari*\n\nHozircha do'kon yo'q.\n\nDo'koningiz bormi? Ro'yxatdan o'ting 👇", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Do'kon ochish / Ro'yxatdan o'tish", callback_data="register_groc")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="client_order")]]), parse_mode="Markdown"); return
+    kb = [[InlineKeyboardButton(f"🛒 {r['name']}", callback_data=f"groc_{key}")] for key, r in _gs]
+    kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="client_order")])
+    await send_new_window(update, context, "🛒 *Oziq-ovqat do'konlari:*\n\nQaysi do'kondan xarid qilasiz?", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+
+async def groc_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    key = q.data.replace("groc_", "", 1)
+    if context.user_data.get("cafe") != key: context.user_data["cart"] = []
+    context.user_data["cafe"] = key; context.user_data["shop_type"] = "grocery"
+    cart = context.user_data.get("cart", [])
+    r = DB["groceries"][key]
+    _del = r.get("delivery", 15000)
+    text = f"🛒 {r['name']}\n⏱ Yetkazish: {_del:,} so'm (har doim pullik)\n\nMahsulotlar:"
+    if cart: text += f"\n\n{_cart_text(cart)}"
+    await send_new_window(update, context, text, reply_markup=_groc_kb(r, cart))
+    _photos = r.get("menu_photos", {})
+    for _n, _pr in r.get("menu", {}).items():
+        if _n in _photos and _n not in set(r.get("sold_out", [])):
+            _price = _pr.get("price", _pr) if isinstance(_pr, dict) else _pr
+            try: await context.bot.send_photo(chat_id=q.from_user.id, photo=_photos[_n], caption=f"{_groc_emoji(_n)} *{_n}*\n💰 {_price:,} so'm\n🛒 {r['name']}", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(f"➕ Savatga qo'shish - {_price:,} so'm", callback_data=f"gadd_{_n}_{_price}")]]))
+            except: pass
+
+async def gadd_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    _parts = q.data.split("_")
+    price = _parts[-1]; name = "_".join(_parts[1:-1])
+    cart = context.user_data.get("cart", []); cart.append((name, int(price))); context.user_data["cart"] = cart
+    cafe_key = context.user_data.get("cafe")
+    r = DB.get("groceries", {}).get(cafe_key, {}) if cafe_key else {}
+    _del = r.get("delivery", 15000) if r else 15000
+    text = f"🛒 {r.get('name','')}\n⏱ Yetkazish: {_del:,} so'm (har doim pullik)\n\n✅ {name} qo'shildi!\n\n{_cart_text(cart)}\n\nYana mahsulot tanlang yoki savatni tasdiqlang:"
+    try: await q.edit_message_text(text, reply_markup=_groc_kb(r, cart))
+    except Exception: await send_new_window(update, context, text, reply_markup=_groc_kb(r, cart))
+
+# --- Do'kon ro'yxatdan o'tish (restoran kabi - STIR + guvohnoma, Super Admin tasdiqlaydi) ---
+async def register_groc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    context.user_data["step"] = "groc_reg_name"
+    await q.edit_message_text("🛒 *Oziq-ovqat do'koni - Ro'yxatdan o'tish*\n\n1️⃣ Do'kon nomini yozing:\nMasalan: *Baraka Market*", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="back_main")]]), parse_mode="Markdown")
+
+async def groc_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    key, r = _my_groc(q.from_user.id)
+    if not r:
+        await send_new_window(update, context, "🛒 Do'koningiz hali yo'q.\nRo'yxatdan o'ting 👇", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Ro'yxatdan o'tish", callback_data="register_groc")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]])); return
+    if not r.get("approved", False):
+        await send_new_window(update, context, f"⏳ *{r['name']}* - tasdiqlash kutilmoqda.\n\nSuper Admin tasdiqlaganda panel ochiladi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]), parse_mode="Markdown"); return
+    txt = f"🛒 *{r['name']} - Do'kon paneli*\n\n📦 Mahsulotlar: {len(r.get('menu', {}))} ta\n🚚 Yetkazish: {r.get('delivery', 15000):,} so'm\n{'🟢 Ochiq' if r.get('active') else '🔴 Yopiq'}\n💳 Karta: {r.get('payme_card', 'Kiritilmagan')}"
+    kb = [[InlineKeyboardButton("➕ Yangi mahsulot qo'shish", callback_data="groc_add")],[InlineKeyboardButton("📸 Mahsulotga rasm qo'shish", callback_data="groc_photo_ask")],[InlineKeyboardButton("💰 Narxni o'zgartirish", callback_data="groc_price_list")],[InlineKeyboardButton("❌ Tugadi / Bor qilish", callback_data="groc_menu_manage")],[InlineKeyboardButton("🚚 Yetkazish narxini o'zgartirish", callback_data="groc_delivery")],[InlineKeyboardButton("💳 Payme / Click karta raqamim", callback_data="groc_card")],[InlineKeyboardButton("🟢 Ochiq / 🔴 Yopiq", callback_data="groc_open")],[InlineKeyboardButton("📊 Bugungi statistika", callback_data="groc_stats")],[InlineKeyboardButton("⬅️ Asosiy", callback_data="back_main")]]
+    await send_new_window(update, context, txt, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+
+async def groc_add_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    context.user_data["step"] = "groc_add"
+    await q.edit_message_text("➕ *Yangi mahsulot qo'shish*\n\nShunday yozing:\n`Sut 1L - 15000`\nBir xabarda bir nechta ham bo'ladi:\n`Sut 1L - 15000\\nNon - 5000\\nTuxum 10 dona - 18000`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="groc_panel")]]), parse_mode="Markdown")
+
+async def groc_photo_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    key, r = _my_groc(q.from_user.id)
+    if not r: await q.edit_message_text("Avval do'kon ro'yxatdan o'tkazing."); return
+    _kb = []
+    for n in r.get("menu", {}).keys():
+        _has = "📸 " if n in r.get("menu_photos", {}) else "🛒 "
+        _kb.append([InlineKeyboardButton(f"{_has}{_groc_emoji(n)} {n}", callback_data=f"groc_photo_{n}")])
+    _kb.append([InlineKeyboardButton("⬅️ Panel", callback_data="groc_panel")])
+    await q.edit_message_text("📸 *Qaysi mahsulotga rasm qo'shamiz?*\n\nMahsulotni tanlang, keyin uning rasmini yuboring.", reply_markup=InlineKeyboardMarkup(_kb), parse_mode="Markdown")
+
+async def groc_photo_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    _name = q.data.replace("groc_photo_", "", 1)
+    context.user_data["step"] = "groc_photo_val"; context.user_data["photo_product"] = _name
+    await q.edit_message_text(f"📸 *{_groc_emoji(_name)} {_name}* uchun rasm yuboring 👇\n\nMahsulotning chiroyli rasmini tanlab yuboring.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="groc_panel")]]), parse_mode="Markdown")
+
+async def groc_price_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    key, r = _my_groc(q.from_user.id)
+    if not r: return
+    kb = []
+    for n, pr in r.get("menu", {}).items():
+        _pr = pr.get("price", pr) if isinstance(pr, dict) else pr
+        kb.append([InlineKeyboardButton(f"{_groc_emoji(n)} {n} - {_pr:,}", callback_data=f"groc_price_{n}")])
+    kb.append([InlineKeyboardButton("⬅️ Panel", callback_data="groc_panel")])
+    await q.edit_message_text("💰 Qaysi mahsulot narxini o'zgartirasiz?", reply_markup=InlineKeyboardMarkup(kb))
+
+async def groc_price_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    name = q.data.replace("groc_price_", "", 1)
+    context.user_data["step"] = "groc_price_val"; context.user_data["edit_name"] = name
+    await q.edit_message_text(f"💰 *{name}* uchun yangi narxni yozing (faqat raqam):\nMasalan: 15000", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="groc_panel")]]), parse_mode="Markdown")
+
+async def groc_menu_manage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    key, r = _my_groc(q.from_user.id)
+    if not r: return
+    kb = []
+    for n, pr in r.get("menu", {}).items():
+        _pr = pr.get("price", pr) if isinstance(pr, dict) else pr
+        mark = "❌ Tugadi" if n in r.get("sold_out", []) else "✅ Bor"
+        kb.append([InlineKeyboardButton(f"{_groc_emoji(n)} {n} - {_pr:,} | {mark}", callback_data=f"groc_toggle_{n}")])
+    kb.append([InlineKeyboardButton("➕ Yangi mahsulot", callback_data="groc_add")])
+    kb.append([InlineKeyboardButton("⬅️ Panel", callback_data="groc_panel")])
+    await q.edit_message_text("❌ / ✅ Mahsulotni Tugadi / Bor qilish:", reply_markup=InlineKeyboardMarkup(kb))
+
+async def groc_toggle_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    name = q.data.replace("groc_toggle_", "", 1)
+    key, r = _my_groc(q.from_user.id)
+    if not r: return
+    _sold = r.setdefault("sold_out", [])
+    if name in _sold: _sold.remove(name)
+    else: _sold.append(name)
+    save(); await groc_menu_manage(update, context)
+
+async def groc_delivery_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    context.user_data["step"] = "groc_delivery_val"
+    await q.edit_message_text("🚚 Yangi yetkazib berish narxini yozing (faqat raqam):\nMasalan: 12000", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="groc_panel")]]))
+
+async def groc_card_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    context.user_data["step"] = "groc_card_val"
+    await q.edit_message_text("💳 *Payme / Click karta raqamingizni yozing*\n\n16 ta raqam. Mijozlar shu kartaga to'laydi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="groc_panel")]]), parse_mode="Markdown")
+
+async def groc_open_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    key, r = _my_groc(q.from_user.id)
+    if not r: return
+    r["active"] = not r.get("active", True); save()
+    await q.answer("🟢 Do'kon ochildi" if r["active"] else "🔴 Do'kon yopildi")
+    await groc_panel(update, context)
+
+async def groc_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    key, r = _my_groc(q.from_user.id)
+    if not r: return
+    my_orders = [o for o in DB["orders"].values() if o.get("cafe") == key and o.get("shop_type") == "grocery"]
+    done = [o for o in my_orders if o.get("status") == "done"]
+    total = sum(o.get("total", 0) for o in done)
+    txt = f"📊 *{r['name']} - Statistika*\n\n📦 Jami buyurtma: {len(my_orders)}\n✅ Yetkazilgan: {len(done)}\n💰 Yetkazilganlardan savdo: {total:,} so'm"
+    await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Panel", callback_data="groc_panel")]]), parse_mode="Markdown")
+
+# Do'kon paneli matnli qadamlar
+async def handle_groc_panel_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    step = context.user_data.get("step")
+    if not step or not step.startswith("groc_"):
+        return False
+    text = (update.message.text or "").strip()
+    key, r = _my_groc(update.effective_user.id)
+    # Ro'yxatdan o'tish - do'kon hali yo'q bo'lsa ham ishlaydi
+    if step == "groc_reg_name":
+        context.user_data["groc_name"] = text; context.user_data["step"] = "groc_reg_stir"
+        await update.message.reply_text(f"✅ Do'kon: *{text}*\n\n2️⃣ STIR ni yozing (9 ta raqam):", parse_mode="Markdown"); return True
+    if step == "groc_reg_stir":
+        if len(text.replace(" ", "")) != 9 or not text.replace(" ", "").isdigit():
+            await update.message.reply_text("❌ STIR 9 ta raqam bo'lishi kerak. Qaytadan yozing:"); return True
+        context.user_data["groc_stir"] = text; context.user_data["step"] = "groc_reg_guvohnoma"
+        await update.message.reply_text("3️⃣ Guvohnoma raqamini yozing:"); return True
+    if step == "groc_reg_guvohnoma":
+        context.user_data["groc_guvohnoma"] = text; context.user_data["step"] = "groc_reg_phone"
+        await update.message.reply_text("4️⃣ Telefon raqamingizni yozing:\nMasalan: 998901234567"); return True
+    if step == "groc_reg_phone":
+        _slug = "".join(c for c in context.user_data.get("groc_name", "shop").lower() if c.isalnum())[:15] or f"shop{update.effective_user.id}"
+        _slug = f"{_slug}_{update.effective_user.id % 10000}"
+        DB.setdefault("groceries", {})[_slug] = {"name": context.user_data.get("groc_name"), "admin": update.effective_user.id, "delivery": 12000, "menu": {}, "menu_photos": {}, "sold_out": [], "active": True, "approved": False, "stir": context.user_data.get("groc_stir"), "guvohnoma": context.user_data.get("groc_guvohnoma"), "phone": text}
+        save(); context.user_data["step"] = None
+        # Super Admin ga tasdiqlash uchun
+        try: await context.bot.send_message(chat_id=SUPER_ADMIN_ID, text=f"🛒 *YANGI OZIQ-OVQAT DO'KONI - Tasdiqlash kutilmoqda!*\n\n🏪 Do'kon: {context.user_data.get('groc_name')}\n🪪 STIR: {context.user_data.get('groc_stir')}\n📄 Guvohnoma: {context.user_data.get('groc_guvohnoma')}\n📞 Tel: {text}\n👤 Admin ID: {update.effective_user.id}", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"admin_groc_approve_{update.effective_user.id}")],[InlineKeyboardButton("❌ Rad etish", callback_data=f"admin_groc_reject_{update.effective_user.id}")]]))
+        except: pass
+        await update.message.reply_text(f"✅ Arizangiz yuborildi!\n\n🛒 Do'kon: {context.user_data.get('groc_name')}\n⏳ Super Admin tasdiqlaganda panel ochiladi. Kuting...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]])); return True
+    if not r:
+        await update.message.reply_text("Avval do'kon ro'yxatdan o'tkazing."); context.user_data["step"] = None; return True
+    if step == "groc_add":
+        menu = {}
+        for line in text.split("\n"):
+            line = line.strip()
+            if not line or "-" not in line: continue
+            n, pr = line.rsplit("-", 1); n = n.strip(); pr = pr.strip().replace(" ", "").replace("so'm", "")
+            try: menu[n] = int(pr)
+            except: pass
+        if not menu: await update.message.reply_text("❌ Tushunmadim. Masalan: Sut 1L - 15000"); return True
+        r.setdefault("menu", {}).update(menu); save(); context.user_data["step"] = None
+        await update.message.reply_text(f"✅ Qo'shildi: {', '.join(menu.keys())}\nHozir do'konda {len(r['menu'])} ta mahsulot bor.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Panelga qaytish", callback_data="groc_panel")]])); return True
+    if step == "groc_price_val":
+        try: price = int(text.replace(" ", "").replace("so'm", ""))
+        except: await update.message.reply_text("❌ Faqat raqam yozing. Masalan: 15000"); return True
+        name = context.user_data.get("edit_name")
+        if name in r.get("menu", {}): r["menu"][name] = price; save(); context.user_data["step"] = None; await update.message.reply_text(f"✅ {name} narxi {price:,} so'm ga o'zgardi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Panelga qaytish", callback_data="groc_panel")]]))
+        else: await update.message.reply_text("Mahsulot topilmadi."); context.user_data["step"] = None
+        return True
+    if step == "groc_card_val":
+        card = text.replace(" ", "")
+        if len(card) < 16 or not card.isdigit(): await update.message.reply_text("❌ Karta 16 ta raqam bo'lishi kerak. Qaytadan yozing:"); return True
+        pretty = " ".join([card[i:i+4] for i in range(0, len(card), 4)])
+        r["payme_card"] = pretty; save(); context.user_data["step"] = None
+        await update.message.reply_text(f"✅ Kartangiz saqlandi: {pretty}\nEndi mijozlarga shu karta chiqadi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Panelga qaytish", callback_data="groc_panel")]])); return True
+    if step == "groc_delivery_val":
+        try: d = int(text.replace(" ", "").replace("so'm", ""))
+        except: await update.message.reply_text("❌ Faqat raqam yozing. Masalan: 12000"); return True
+        r["delivery"] = d; save(); context.user_data["step"] = None
+        await update.message.reply_text(f"✅ Yetkazish narxi {d:,} so'm ga o'zgardi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Panelga qaytish", callback_data="groc_panel")]])); return True
+    return False
+
+# Super Admin - do'konni tasdiqlash
+async def admin_groc_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    uid = int(q.data.replace("admin_groc_approve_", ""))
+    for k, r in DB.get("groceries", {}).items():
+        if r.get("admin") == uid: r["approved"] = True; save(); break
+    try: await context.bot.send_message(chat_id=uid, text="✅ *Do'koningiz tasdiqlandi!*\n\nEndi 🛒 Do'kon panelim dan mahsulotlaringizni qo'shishingiz mumkin.", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Do'kon panelim", callback_data="groc_panel")]]))
+    except: pass
+    await q.edit_message_text("✅ Oziq-ovqat do'koni tasdiqlandi!")
+
+async def admin_groc_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    uid = int(q.data.replace("admin_groc_reject_", ""))
+    for k in list(DB.get("groceries", {}).keys()):
+        if DB["groceries"][k].get("admin") == uid: del DB["groceries"][k]; save(); break
+    try: await context.bot.send_message(chat_id=uid, text="❌ Do'kon arizangiz rad etildi. Ma'lumotlarni tekshirib qayta urinib ko'ring.")
+    except: pass
+    await q.edit_message_text("❌ Do'kon arizasi rad etildi.")
 
 async def cafe_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -1146,6 +1434,7 @@ async def add_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ASOSIY TUZATISH: endi faqat kichik yozuv emas - xabarni o'zini yangilaymiz, savat ko'rinadi
     cafe_key = context.user_data.get("cafe")
     r = DB["restaurants"].get(cafe_key, {}) if cafe_key else {}
+    if not r: r = DB.get("groceries", {}).get(cafe_key, {}) if cafe_key else {}
     _del = r.get("delivery", 15000) if r else 15000
     text = f"🏪 {r.get('name','')}\n⏱ Yetkazish: {_del:,} so'm (har doim pullik)\n\n✅ {name} qo'shildi!\n\n{_cart_text(cart)}\n\nYana taom tanlang yoki savatni tasdiqlang:"
     try: await q.edit_message_text(text, reply_markup=_menu_kb(r, cart))
@@ -1160,6 +1449,7 @@ async def confirm_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Avval savatni to'liq ko'rsatamiz - mijoz necha taom olganini ko'rib tasdiqlaydi
     cafe_key = context.user_data.get("cafe")
     r = DB["restaurants"].get(cafe_key, {}) if cafe_key else {}
+    if not r: r = DB.get("groceries", {}).get(cafe_key, {}) if cafe_key else {}
     _del = r.get("delivery", 15000) if r else 15000
     _sub = sum(pr for _, pr in cart)
     _del2 = _del  # 100 000 dan oshsa ham bepul emas - yetkazish har doim pullik!
@@ -1283,11 +1573,12 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Naqd (kurerdan) - hisobdan yechilmaydi, Super Adminga qarz ham yozilmaydi - naqdni kurer olib boradi
     # YANGI QOIDA: Super Admin pulga aralashmaydi - hech kim Super Adminga qarz yozmaydi. Hamma pul RESTORANGA boradi.
     _rest_owed = 0
-    DB["orders"][str(oid)] = {"id": oid, "cafe": cafe_key, "cart": cart, "total": total, "food_total": _sub, "delivery_fee": _del, "payment": payment, "user_id": int(uid), "name": DB["users"][uid]["name"], "phone": DB["users"][uid].get("phone",""), "address": address, "status": "waiting", "courier_id": None, "created": "now", "rest_owed": _rest_owed, "rest_paid": False}
+    _is_groc = cafe_key in DB.get("groceries", {})
+    DB["orders"][str(oid)] = {"id": oid, "cafe": cafe_key, "shop_type": "grocery" if _is_groc else "restaurant", "cart": cart, "total": total, "food_total": _sub, "delivery_fee": _del, "payment": payment, "user_id": int(uid), "name": DB["users"][uid]["name"], "phone": DB["users"][uid].get("phone",""), "address": address, "status": "waiting", "courier_id": None, "created": "now", "rest_owed": _rest_owed, "rest_paid": False}
     save()
     context.user_data["step"] = None
-    r = DB["restaurants"][cafe_key]
-    text = f"🔥 YANGI BUYURTMA #{oid}!\n\n🏪 {r['name']}\n👤 {DB['users'][uid]['name']} | 📞 {DB['users'][uid].get('phone')}\n📍 {address}\n"
+    r = DB["restaurants"].get(cafe_key) or DB.get("groceries", {}).get(cafe_key, {})
+    text = f"🔥 YANGI BUYURTMA #{oid}!\n\n{'🛒' if _is_groc else '🏪'} {r['name']}\n👤 {DB['users'][uid]['name']} | 📞 {DB['users'][uid].get('phone')}\n📍 {address}\n"
     for n, pr, qty, sub in _group_cart(cart):
         if qty > 1: text += f"🛒 {n} x{qty} - {sub:,} so'm\n"
         else: text += f"🛒 {n} - {pr:,} so'm\n"
@@ -1857,6 +2148,11 @@ async def generic_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tot = sum(u.get("client_balance",0) for u in DB["users"].values())
         txt += f"\n\n💰 Mijozlar hisobida jami: {tot:,} so'm"
         await send_new_window(update, context, txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Admin panel", callback_data="admin_panel")]]))
+    elif q.data == "admin_grocs":
+        if q.from_user.id != SUPER_ADMIN: await q.answer("Faqat admin", show_alert=True); return
+        _gs = DB.get("groceries", {})
+        txt = "🛒 *Oziq-ovqat do'konlari:*\n\n" + ("\n".join([f"{r.get('name')} | {len(r.get('menu',{}))} ta mahsulot | {'✅ Tasdiqlangan' if r.get('approved') else '⏳ Kutilmoqda'} | {'🟢 Ochiq' if r.get('active') else '🔴 Yopiq'} | Yetkazish: {r.get('delivery',12000):,} | 💳 {r.get('payme_card','-')}" for r in _gs.values()]) or "Hali do'kon yo'q")
+        await send_new_window(update, context, txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Admin panel", callback_data="admin_panel")]]))
     elif q.data == "admin_rests":
         if q.from_user.id != SUPER_ADMIN: await q.answer("Faqat admin", show_alert=True); return
         txt = "🏪 *Restoranlar:*\n\n" + "\n".join([f"{r.get('name')} | {len(r.get('menu',{}))} ta taom | {'🟢 Ochiq' if r.get('open',True) else '🔴 Yopiq'} | Yetkazish: {r.get('delivery',15000):,} | 💳 {r.get('payme_card','-')}" for r in DB["restaurants"].values()])
@@ -1966,7 +2262,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(admin_rest_pay_ask, pattern="^restpay_"))
     app.add_handler(CallbackQueryHandler(admin_rest_pay_ok, pattern="^restpayok_"))
     app.add_handler(CallbackQueryHandler(admin_topups_info, pattern="^admin_topups_info$"))
-    app.add_handler(CallbackQueryHandler(generic_back, pattern="^(back_main|client_my|courier_my|courier_balance|admin_orders|rest_orders|admin_couriers|admin_users|admin_rests|rest_menu|rest_stats)$"))
+    app.add_handler(CallbackQueryHandler(generic_back, pattern="^(back_main|client_my|courier_my|courier_balance|admin_orders|rest_orders|admin_couriers|admin_users|admin_rests|admin_grocs|rest_menu|rest_stats)$"))
     app.add_handler(MessageHandler(filters.CONTACT, on_contact))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
