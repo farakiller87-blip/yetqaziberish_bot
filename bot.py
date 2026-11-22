@@ -19,7 +19,7 @@ def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, use_reloader=False)
 Thread(target=run_flask, daemon=True).start()
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -668,23 +668,40 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["step"] = "address"
     await q.message.reply_text("📍 Manzilingizni yozing (Masalan: Yashil Bozor, 5-uy):", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📍 Lokatsiya yuborish", request_location=True)]], resize_keyboard=True, one_time_keyboard=True))
 async def on_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message.contact: 
+    if not update.message or not update.message.contact:
         return
     uid = str(update.effective_user.id)
+    if uid not in DB["users"]:
+        DB["users"][uid] = {"name": update.effective_user.first_name or "Mijoz", "role": "client", "phone": "", "online": False, "balance": 0, "delivered": 0}
     DB["users"][uid]["phone"] = update.message.contact.phone_number; save()
-    if context.user_data.get("step") == "regcourier_phone":
+    step = context.user_data.get("step")
+    if step == "regcourier_phone":
         await finish_courier_reg_with_phone(update, context)
         return
-    if context.user_data.get("step") == "reg_phone":
+    if step == "reg_phone":
         await finish_reg_with_phone(update, context)
         return
-    if context.user_data.get("step") == "phone":
+    if step == "phone":
+        if not context.user_data.get("cart"):
+            context.user_data["step"] = None
+            await update.message.reply_text("✅ Raqamingiz qabul qilindi! Endi buyurtma berishingiz mumkin.", reply_markup=ReplyKeyboardRemove())
+            await show_main(update, update.effective_user.id, "🍔 Buyurtma berish uchun restoranni tanlang:")
+            return
         context.user_data["step"] = "payment"
-        await update.message.reply_text("💳 To'lov turini tanlang:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💵 Naqd", callback_data="pay_naqd"), InlineKeyboardButton("💳 Click", callback_data="pay_click"), InlineKeyboardButton("💳 Payme", callback_data="pay_payme")]]))
+        await update.message.reply_text("✅ Raqamingiz qabul qilindi!\n\n💳 To'lov turini tanlang:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💵 Naqd", callback_data="pay_naqd"), InlineKeyboardButton("💳 Click", callback_data="pay_click"), InlineKeyboardButton("💳 Payme", callback_data="pay_payme")]]))
         return
-    elif context.user_data.get("step") == "courier_phone":
-        await update.message.reply_text("✅ Kuryer sifatida ro'yxatdan o'tding! Endi ONLINE bo'l.")
+    if step == "courier_phone":
+        context.user_data["step"] = None
+        await update.message.reply_text("✅ Raqamingiz qabul qilindi! Endi ONLINE bo'ling.", reply_markup=ReplyKeyboardRemove())
         await show_main(update, update.effective_user.id)
+        return
+    context.user_data["step"] = None
+    await update.message.reply_text("✅ Raqamingiz qabul qilindi! Endi buyurtma berishingiz mumkin.", reply_markup=ReplyKeyboardRemove())
+    await show_main(update, update.effective_user.id, "🍔 Buyurtma berish uchun restoranni tanlang:")
+
+async def send_phone_btn_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    await q.message.reply_text("Pastdagi tugmani bosib raqamingizni yuboring 👇", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📞 Raqamni yuborish", request_contact=True)]], resize_keyboard=True, one_time_keyboard=True))
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_reg_text(update, context):
@@ -968,6 +985,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(courier_panel, pattern="^courier_panel$"))
     app.add_handler(CallbackQueryHandler(courier_balance_new, pattern="^courier_balance_new$"))
     app.add_handler(CallbackQueryHandler(courier_withdraw, pattern="^courier_withdraw$"))
+    app.add_handler(CallbackQueryHandler(send_phone_btn_handler, pattern="^send_phone_btn$"))
     app.add_handler(CallbackQueryHandler(courier_withdraw_approve, pattern="^wdok_"))
     app.add_handler(CallbackQueryHandler(courier_withdraw_reject, pattern="^wdno_"))
     app.add_handler(CallbackQueryHandler(courier_edit_ask, pattern="^courier_edit$"))
