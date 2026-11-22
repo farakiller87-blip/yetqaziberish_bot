@@ -137,7 +137,7 @@ def main_kb(role, locked_role=None):
         [InlineKeyboardButton("🚴 Kuryer sifatida ro'yxatdan o'tish", callback_data="register_courier")],
     ])
 
-async def send_new_window(update, context, text, reply_markup=None):
+async def send_new_window(update, context, text, reply_markup=None, parse_mode=None, **kwargs):
     """YANGI OYNA: eski panel xabarini o'chirib, bitta yangi xabar yuboradi.
     Mijoz panelida oldingi operatsiyalar ko'rinmasligi uchun."""
     # Eski bot xabarini o'chirishga urinamiz
@@ -152,9 +152,9 @@ async def send_new_window(update, context, text, reply_markup=None):
             # Callback bo'lsa - eski xabarni o'chirib yangisini yuboramiz (edit emas, toza oyna)
             try: await update.callback_query.message.delete()
             except: pass
-            m = await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+            m = await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
         else:
-            m = await update.message.reply_text(text, reply_markup=reply_markup)
+            m = await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
         if context is not None:
             context.user_data["panel_msg_id"] = m.message_id
         return m
@@ -2327,9 +2327,7 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def generic_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
-    if q.data == "rest_list": await rest_list(update, context); return
-    elif q.data == "groc_list": await groc_list(update, context); return
-    elif q.data == "back_main": await show_main(update, q.from_user.id)
+    if q.data == "back_main": await show_main(update, q.from_user.id)
     elif q.data == "client_order": await client_order(update, context)
     elif q.data == "courier_my":
         oid_list = [o for o in DB["orders"].values() if o.get("courier_id") == q.from_user.id and o["status"] == "taken"]
@@ -2536,7 +2534,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(admin_rest_pay_ask, pattern="^restpay_"))
     app.add_handler(CallbackQueryHandler(admin_rest_pay_ok, pattern="^restpayok_"))
     app.add_handler(CallbackQueryHandler(admin_topups_info, pattern="^admin_topups_info$"))
-    app.add_handler(CallbackQueryHandler(generic_back, pattern="^(back_main|client_my|courier_my|courier_balance|admin_orders|rest_orders|admin_couriers|admin_users|admin_rests|admin_grocs|rest_menu|rest_stats|rest_list|groc_list)$"))
+    app.add_handler(CallbackQueryHandler(generic_back, pattern="^(back_main|client_my|courier_my|courier_balance|admin_orders|rest_orders|admin_couriers|admin_users|admin_rests|admin_grocs|rest_menu|rest_stats)$"))
     # CATCH-ALL: hech qaysi handlerga tushmagan tugma - jim turmasin, sababini aytsin
     async def _unmatched_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         q = update.callback_query
