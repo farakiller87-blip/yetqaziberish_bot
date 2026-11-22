@@ -1807,8 +1807,35 @@ async def on_location(update, context):
     if not update.message.location:
         return
     loc = update.message.location
+    # === KURYERNI XARITADA KUZATISH ===
+    # Agar lokatsiyani kuryer yuborgan bo'lsa va uning olib ketgan buyurtmasi bo'lsa - mijozga yuboramiz
+    _uid = str(update.effective_user.id)
+    _u = DB.get("users", {}).get(_uid, {})
+    if _u.get("role") == "courier" or _u.get("locked_role") == "courier":
+        _active = [o for o in DB.get("orders", {}).values() if o.get("courier_id") == update.effective_user.id and o.get("status") == "taken"]
+        if _active:
+            o = _active[0]
+            _map = f"https://maps.google.com/?q={loc.latitude},{loc.longitude}"
+            try:
+                await context.bot.send_location(chat_id=o["user_id"], latitude=loc.latitude, longitude=loc.longitude)
+                await context.bot.send_message(chat_id=o["user_id"], text=f"📍 *Kuryer hozir shu yerda!*\n\n🚴 Buyurtma #{o['id']} - kuryer yo'lda!\n📍 Xaritada ko'rish: {_map}\n\nKuryer har safar joylashuvini yuborganda - sizga yangi nuqta keladi.\n\nKuryerni qayta so'rash uchun pastdagi tugmani bosing 👇", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📍 Kuryer qayerda?", callback_data=f"courier_where_{o['id']}")]]))
+            except: pass
+            await update.message.reply_text(f"✅ Joylashuvingiz mijozga yuborildi!\n📍 Mijoz sizni xaritada ko'ryapti.\n\nBuyurtmani topshirganda YETKAZDIM ni bosing.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ YETKAZDIM", callback_data=f"courier_done_{o['id']}")]]))
+            return
     object.__setattr__(update.message, "text", f"📍 Lokatsiya: https://maps.google.com/?q={loc.latitude},{loc.longitude}")
     await on_text(update, context)
+
+# Mijoz "Kuryer qayerda?" ni bossa - kuryerdan joylashuv so'raymiz
+async def courier_where(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    oid = int(q.data.replace("courier_where_", ""))
+    o = DB.get("orders", {}).get(str(oid))
+    if not o or not o.get("courier_id"):
+        await q.answer("Kuryer hali biriktirilmadi", show_alert=True); return
+    try: await context.bot.send_message(chat_id=o["courier_id"], text=f"📍 Mijoz sizni qayerdaligingizni so'rayapti!\n\nBuyurtma #{oid} - hozirgi joylashuvingizni yuboring 👇\n\nTelegramda: 📎 → Lokatsiya → 'Joylashuvimni yuborish' ni bosing.", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📍 Joylashuvimni yuborish", request_location=True)]], resize_keyboard=True, one_time_keyboard=True))
+    except: pass
+    await q.answer("Kuryerdan joylashuv so'raldi! Tez orada keladi.")
+    await send_new_window(update, context, "📍 Kuryerdan joylashuv so'raldi!\n\nKuryer joylashuvini yuborganda - sizga xaritada keladi.\nBiroz kuting...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
 
 async def main():
     app = Application.builder().token(BOT_TOKEN).build()
@@ -1833,6 +1860,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(add_item, pattern="^add_"))
     app.add_handler(CallbackQueryHandler(confirm_cart, pattern="^confirm_cart$"))
     app.add_handler(CallbackQueryHandler(confirm_cart_yes, pattern="^confirm_cart_yes$"))
+    app.add_handler(CallbackQueryHandler(courier_where, pattern="^courier_where_"))
     app.add_handler(CallbackQueryHandler(cart_view, pattern="^cart_view$"))
     app.add_handler(CallbackQueryHandler(cart_del, pattern="^cart_del_"))
     app.add_handler(CallbackQueryHandler(pay_select, pattern="^pay_"))
