@@ -479,6 +479,16 @@ async def rest_add_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="rest_panel")]]), parse_mode="Markdown")
 
 
+async def rest_loc_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    key, r = _my_rest(q.from_user.id)
+    if not r:
+        await q.edit_message_text("Avval restoran ro'yxatdan o'tkazing.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]])); return
+    context.user_data["step"] = "rest_loc_val"
+    _cur = f"\n\nHozirgi: 📍 {r.get('lat'):.5f}, {r.get('lon'):.5f}" if r.get("lat") and r.get("lon") else "\n\nHozircha joylashuv kiritilmagan."
+    await q.edit_message_text(f"📍 *Restoran joylashuvim (xarita)*\n\nRestoran turgan joydan turib, pastdagi 📎 (skrepka) → Joylashuv → Jonli joylashuvni yuboring.{_cur}\n\nMijoz lokatsiya yuborsa - masofa shu yerdan hisoblanadi.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="rest_panel")]]), parse_mode="Markdown")
+
 async def rest_photo_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     key, r = _my_rest(q.from_user.id)
@@ -1359,6 +1369,16 @@ async def groc_add_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     context.user_data["step"] = "groc_add"
     await q.edit_message_text("➕ *Yangi mahsulot qo'shish*\n\nShunday yozing:\n`Sut 1L - 15000`\nBir xabarda bir nechta ham bo'ladi:\n`Sut 1L - 15000\\nNon - 5000\\nTuxum 10 dona - 18000`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="groc_panel")]]), parse_mode="Markdown")
+
+async def groc_loc_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    key, r = _my_groc(q.from_user.id)
+    if not r:
+        await q.edit_message_text("Avval do'kon ro'yxatdan o'tkazing.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]])); return
+    context.user_data["step"] = "groc_loc_val"
+    _cur = f"\n\nHozirgi: 📍 {r.get('lat'):.5f}, {r.get('lon'):.5f}" if r.get("lat") and r.get("lon") else "\n\nHozircha joylashuv kiritilmagan."
+    await q.edit_message_text(f"📍 *Do'kon joylashuvim (xarita)*\n\nDo'kon turgan joydan turib, pastdagi 📎 (skrepka) → Joylashuv → Jonli joylashuvni yuboring.{_cur}\n\nMijoz lokatsiya yuborsa - masofa shu yerdan hisoblanadi.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="groc_panel")]]), parse_mode="Markdown")
 
 async def groc_photo_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
