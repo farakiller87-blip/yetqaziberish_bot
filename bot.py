@@ -1336,14 +1336,63 @@ async def reyting(update: Update, context: ContextTypes.DEFAULT_TYPE):
     avg = sum(r['stars'] for r in ratings) / len(ratings)
     text += f"\nO'rtacha: {avg:.1f} ⭐ | Jami: {len(ratings)} ta"
     await update.message.reply_text(text)
+
+# --- ADMIN PANEL (TELEFON + KOMPYUTER) ---
+# Muhim: admin panel Telegram ning o'zida. Telefon Telegram ilovasi + Kompyuter Telegram Desktop / web.telegram.org - ikkalasida ham AYNI hisob (SUPER_ADMIN) bilan kirsang - AYNI panel, AYNI ma'lumot chiqadi.
+# Ma'lumot telefonda emas, Render serverdagi db.json da turadi - shuning uchun qaysi qurilmadan kirsang ham bir xil nazorat qilasan.
+# /admin buyrug'i - istalgan qurilmadan panelni ochadi.
+
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != SUPER_ADMIN:
+        try: await update.message.reply_text("⛔ Bu panel faqat adminga.")
+        except: pass
+        return
+    orders = list(DB["orders"].values())
+    today_done = len([o for o in orders if o.get("status") == "done"])
+    waiting = len([o for o in orders if o.get("status") in ("waiting", "to_courier")])
+    taken = len([o for o in orders if o.get("status") == "taken"])
+    online = len([u for u in DB["users"].values() if u.get("locked_role") == "courier" and u.get("online")])
+    total_client_bal = sum(u.get("client_balance", 0) for u in DB["users"].values())
+    text = f"👑 *ADMIN PANEL*\n\n📦 Buyurtma: jami {len(orders)} ta\n⏳ Kutilmoqda: {waiting} ta | 🚴 Yo'lda: {taken} ta | ✅ Yetkazilgan: {today_done} ta\n🚴 Online kuryer: {online} ta\n💰 Mijozlar hisobida jami: {total_client_bal:,} so'm\n🏪 Restoran: {len(DB['restaurants'])} ta | 👥 Foydalanuvchi: {len(DB['users'])} ta\n\n📱 Telefon + 💻 Kompyuter - ikkalasida ham shu panel.\nMa'lumot serverda, qurilmada emas."
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📦 Buyurtmalar", callback_data="admin_orders")],
+        [InlineKeyboardButton("🧾 Hisob to'ldirish - chek keldi", callback_data="admin_topups_info")],
+        [InlineKeyboardButton("🚴 Kuryerlar", callback_data="admin_couriers")],
+        [InlineKeyboardButton("👥 Mijozlar + Hisoblari", callback_data="admin_users")],
+        [InlineKeyboardButton("🏪 Restoranlar", callback_data="admin_rests")],
+        [InlineKeyboardButton("📊 Statistika", callback_data="admin_stats")],
+        [InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")],
+    ])
+    if update.callback_query:
+        await send_new_window(update, context, text, reply_markup=kb)
+    else:
+        await update.message.reply_text(text, reply_markup=kb)
+
+async def admin_topups_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    if q.from_user.id != SUPER_ADMIN:
+        await q.answer("Faqat admin", show_alert=True); return
+    await send_new_window(update, context, "🧾 *Hisob to'ldirish - cheklar*\n\nMijoz Click / Payme yoki Paynet orqali to'ldirganda chek SHU CHATGA - sizga shaxsiy xabar bo'lib keladi.\nChek ostida ikkita tugma bo'ladi:\n✅ Tasdiqlash - hisobga pul tushadi\n❌ Rad etish - pul tushmaydi\n\nChek kelmasa - mijoz hali to'ldirmagan.\nMijozlar hisobini pastdan ko'ring:",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("👥 Mijozlar + Hisoblari", callback_data="admin_users")],
+            [InlineKeyboardButton("⬅️ Admin panel", callback_data="admin_panel")],
+        ]))
+
 # --- ADMIN PANEL ---
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
-    total = len(DB["orders"]); done = len([o for o in DB["orders"].values() if o["status"] == "done"])
-    couriers = len([u for u in DB["users"].values() if u.get("role") == "courier"])
-    online = len([u for u in DB["users"].values() if u.get("role") == "courier" and u.get("online")])
-    clients = len([u for u in DB["users"].values() if u.get("role") == "client"])
-    await q.edit_message_text(f"📊 STATISTIKA\n\n📦 Jami buyurtma: {total}\n✅ Yetkazilgan: {done}\n🚴 Kuryerlar: {couriers} ta (online: {online})\n👥 Mijozlar: {clients} ta\n🏪 Restoranlar: {len(DB['restaurants'])} ta", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+    if q.from_user.id != SUPER_ADMIN: await q.answer("Faqat admin", show_alert=True); return
+    orders = list(DB["orders"].values())
+    total = len(orders); done = len([o for o in orders if o["status"] == "done"])
+    revenue = sum(o.get("total", 0) for o in orders if o.get("status") == "done")
+    couriers = len([u for u in DB["users"].values() if u.get("locked_role") == "courier"])
+    online = len([u for u in DB["users"].values() if u.get("locked_role") == "courier" and u.get("online")])
+    clients = len([u for u in DB["users"].values() if u.get("locked_role") == "client"])
+    rests = len([u for u in DB["users"].values() if u.get("locked_role") == "restaurant"])
+    client_bal = sum(u.get("client_balance", 0) for u in DB["users"].values())
+    courier_bal = sum(u.get("balance", 0) for u in DB["users"].values())
+    await send_new_window(update, context, f"📊 *STATISTIKA*\n\n📦 Jami buyurtma: {total} ta\n✅ Yetkazilgan: {done} ta\n💰 Yetkazilganlardan summa: {revenue:,} so'm\n🚴 Kuryerlar: {couriers} ta (online: {online})\n👥 Mijozlar: {clients} ta\n🏪 Restoran egalari: {rests} ta\n🏪 Restoranlar: {len(DB['restaurants'])} ta\n💳 Mijozlar hisobida: {client_bal:,} so'm\n💰 Kuryerlar hisobida: {courier_bal:,} so'm",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Admin panel", callback_data="admin_panel")]]))
 
 async def generic_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -1361,16 +1410,23 @@ async def generic_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
         txt = "📦 Buyurtmalaring:\n\n" + "\n".join([f"#{o['id']} | {o['status']} | {o['total']} so'm" for o in my[-5:]])
         await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
     elif q.data in ["admin_orders","rest_orders"]:
-        txt = "📦 Oxirgi buyurtmalar:\n\n" + "\n".join([f"#{o['id']} | {o['status']} | {o['total']} so'm | {o['address'][:20]}" for o in list(DB["orders"].values())[-10:]]) if DB["orders"] else "Yo'q"
-        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+        if q.data == "admin_orders" and q.from_user.id != SUPER_ADMIN: await q.answer("Faqat admin", show_alert=True); return
+        txt = "📦 *Oxirgi buyurtmalar:*\n\n" + "\n".join([f"#{o['id']} | {o.get('status')} | {o.get('total',0):,} so'm | {o.get('name','')} | {(o.get('address','') or '')[:25]}" for o in list(DB["orders"].values())[-10:]]) if DB["orders"] else "Hali buyurtma yo'q"
+        await send_new_window(update, context, txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Admin panel", callback_data="admin_panel")]]))
     elif q.data == "admin_couriers":
-        txt = "🚴 Kuryerlar:\n\n" + "\n".join([f"{u['name']} | {'🟢' if u.get('online') else '🔴'} | {u.get('delivered',0)} ta | {u.get('balance',0)} so'm" for u in DB["users"].values() if u.get("role")=="courier"]) or "Yo'q"
-        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+        if q.from_user.id != SUPER_ADMIN: await q.answer("Faqat admin", show_alert=True); return
+        txt = "🚴 *Kuryerlar:*\n\n" + "\n".join([f"{u.get('name')} | {'🟢 ONLINE' if u.get('online') else '🔴 OFFLINE'} | Yetkazgan: {u.get('delivered',0)} ta | Hisob: {u.get('balance',0):,} so'm | 📞 {u.get('phone','-')}" for u in DB["users"].values() if u.get("locked_role")=="courier"]) or "Hali kuryer yo'q"
+        await send_new_window(update, context, txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Admin panel", callback_data="admin_panel")]]))
     elif q.data == "admin_users":
-        await q.edit_message_text(f"👥 Jami foydalanuvchi: {len(DB['users'])}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+        if q.from_user.id != SUPER_ADMIN: await q.answer("Faqat admin", show_alert=True); return
+        txt = "👥 *Mijozlar + Hisoblari:*\n\n" + "\n".join([f"{u.get('name')} | Rol: {u.get('locked_role') or u.get('role')} | 💳 Hisob: {u.get('client_balance',0):,} so'm | 📞 {u.get('phone','-')}" for u in list(DB["users"].values())[-20:]]) or "Yo'q"
+        tot = sum(u.get("client_balance",0) for u in DB["users"].values())
+        txt += f"\n\n💰 Mijozlar hisobida jami: {tot:,} so'm"
+        await send_new_window(update, context, txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Admin panel", callback_data="admin_panel")]]))
     elif q.data == "admin_rests":
-        txt = "🏪 Restoranlar:\n\n" + "\n".join([f"{r['name']} | {len(r['menu'])} ta taom" for r in DB["restaurants"].values()])
-        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+        if q.from_user.id != SUPER_ADMIN: await q.answer("Faqat admin", show_alert=True); return
+        txt = "🏪 *Restoranlar:*\n\n" + "\n".join([f"{r.get('name')} | {len(r.get('menu',{}))} ta taom | {'🟢 Ochiq' if r.get('open',True) else '🔴 Yopiq'} | Yetkazish: {r.get('delivery',15000):,} | 💳 {r.get('payme_card','-')}" for r in DB["restaurants"].values()])
+        await send_new_window(update, context, txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Admin panel", callback_data="admin_panel")]]))
     elif q.data in ["rest_menu","rest_stats"]:
         await rest_menu_manage(update, context)
 
@@ -1391,6 +1447,7 @@ async def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reyting", reyting))
+    app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CallbackQueryHandler(set_role, pattern="^setrole_"))
     app.add_handler(CallbackQueryHandler(change_role, pattern="^change_role$"))
     app.add_handler(CallbackQueryHandler(client_order, pattern="^client_order$"))
@@ -1432,6 +1489,8 @@ async def main():
     app.add_handler(CallbackQueryHandler(courier_done, pattern="^done_"))
     app.add_handler(CallbackQueryHandler(on_rate, pattern="^rate_"))
     app.add_handler(CallbackQueryHandler(admin_stats, pattern="^admin_stats$"))
+    app.add_handler(CallbackQueryHandler(admin_panel, pattern="^admin_panel$"))
+    app.add_handler(CallbackQueryHandler(admin_topups_info, pattern="^admin_topups_info$"))
     app.add_handler(CallbackQueryHandler(generic_back, pattern="^(back_main|client_my|courier_my|courier_balance|admin_orders|rest_orders|admin_couriers|admin_users|admin_rests|rest_menu|rest_stats)$"))
     app.add_handler(MessageHandler(filters.CONTACT, on_contact))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
