@@ -1,6 +1,6 @@
 # TERMIZ OVQAT BOTI - SENING BOTING + 9 TA OSHXONA BIRLASHTIRILDI
 # Eski botingning hamma funksiyasi saqlandi: kuryer, reyting, admin, restoran.
-# Qo'shilgan: 9 ta Termiz oshxonasi, har birida o'z delivery narxi, Payme to'lovi, 100 000 dan yuqoriga bepul yetkazish.
+# Qo'shilgan: 9 ta Termiz oshxonasi, har birida o'z delivery narxi, Payme to'lovi, Yetkazib berish har doim pullik - summa qancha bo'lsa ham.
 # Ishga tushirish: BOT_TOKEN ni Render Environment da qo'yganingcha qoldir, db.json eski bo'lsa o'chir - yangi restoranlar chiqishi uchun.
 # requirements.txt: python-telegram-bot==22.2 + Flask (o'sha faylingni ishlat)
 
@@ -339,7 +339,7 @@ async def handle_reg_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reg["menu"] = menu
         context.user_data["reg"] = reg
         context.user_data["step"] = "reg_delivery"
-        await update.message.reply_text(f"✅ Menyu saqlandi: {len(menu)} ta taom.\n\n5-qadam: Yetkazib berish narxini yozing (faqat raqam, so'mda):\nMasalan: 15000\n100 000 dan yuqoriga bepul bo'ladi.")
+        await update.message.reply_text(f"✅ Menyu saqlandi: {len(menu)} ta taom.\n\n5-qadam: Yetkazib berish narxini yozing (faqat raqam, so'mda):\nMasalan: 15000\nYetkazish har doim pullik - summa qancha bo'lsa ham.")
         return True
     if step == "reg_delivery":
         try: delivery = int(text.replace(" ","").replace("so'm",""))
@@ -552,7 +552,7 @@ async def handle_rest_panel_text(update: Update, context: ContextTypes.DEFAULT_T
         except:
             await update.message.reply_text("❌ Faqat raqam yozing. Masalan: 12000"); return True
         r["delivery"]=d; save(); context.user_data["step"]=None
-        await update.message.reply_text(f"✅ Yetkazish narxi {d:,} so'm ga o'zgardi. 100 000 dan yuqoriga bepul.",
+        await update.message.reply_text(f"✅ Yetkazish narxi {d:,} so'm ga o'zgardi. Yetkazish har doim pullik.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏪 Panelga qaytish", callback_data="rest_panel")]]))
         return True
     return False
@@ -1061,7 +1061,7 @@ async def cafe_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cart = context.user_data.get("cart", [])
     r = DB["restaurants"][key]
     _del = r.get("delivery", 15000)
-    text = f"🏪 {r['name']}\n⏱ Yetkazish: {_del:,} so'm (100 000 dan yuqoriga BEPUL)\n\nMenyu:"
+    text = f"🏪 {r['name']}\n⏱ Yetkazish: {_del:,} so'm (har doim pullik)\n\nMenyu:"
     if cart:
         text += f"\n\n{_cart_text(cart)}"
     await send_new_window(update, context, text, reply_markup=_menu_kb(r, cart))
@@ -1077,7 +1077,7 @@ async def add_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cafe_key = context.user_data.get("cafe")
     r = DB["restaurants"].get(cafe_key, {}) if cafe_key else {}
     _del = r.get("delivery", 15000) if r else 15000
-    text = f"🏪 {r.get('name','')}\n⏱ Yetkazish: {_del:,} so'm (100 000 dan yuqoriga BEPUL)\n\n✅ {name} qo'shildi!\n\n{_cart_text(cart)}\n\nYana taom tanlang yoki savatni tasdiqlang:"
+    text = f"🏪 {r.get('name','')}\n⏱ Yetkazish: {_del:,} so'm (har doim pullik)\n\n✅ {name} qo'shildi!\n\n{_cart_text(cart)}\n\nYana taom tanlang yoki savatni tasdiqlang:"
     try: await q.edit_message_text(text, reply_markup=_menu_kb(r, cart))
     except Exception:
         await send_new_window(update, context, text, reply_markup=_menu_kb(r, cart))
@@ -1092,7 +1092,7 @@ async def confirm_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     r = DB["restaurants"].get(cafe_key, {}) if cafe_key else {}
     _del = r.get("delivery", 15000) if r else 15000
     _sub = sum(pr for _, pr in cart)
-    _del2 = 0 if _sub >= 100000 else _del
+    _del2 = _del  # 100 000 dan oshsa ham bepul emas - yetkazish har doim pullik!
     await send_new_window(update, context, _cart_text(cart) + f"\n\n🏪 Restoran: {r.get('name','')}\n🚗 Yetkazish: {_del2:,} so'm\n💰 JAMI: {_sub + _del2:,} so'm\n\nTasdiqlaysizmi?",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Ha, tasdiqlash", callback_data="confirm_cart_yes")],
@@ -1184,7 +1184,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cart = context.user_data.get("cart", []); cafe_key = context.user_data.get("cafe")
     _sub = sum(p for _, p in cart)
     _del = DB["restaurants"][cafe_key].get("delivery", 15000)
-    if _sub >= 100000: _del = 0
+    # 100 000 dan oshsa ham bepul emas - _del o'zgarmaydi, yetkazish har doim pullik!
     total = _sub + _del
     # NAQD = HISOBDAN: mijoz Naqd tanlagan bo'lsa - pul avval hisobdan yechiladi, hisobda yetmasa buyurtma ketmaydi
     _pay_tmp = context.user_data.get("payment", "Naqd 💵")
