@@ -68,7 +68,11 @@ if _changed: save()
 
 
 # --- YORDAMCHI ---
-def main_kb(role):
+
+def locked_msg(locked):
+    return f"🔒 Siz {locked} roliga QULFLANGANSIZ.\n\nBoshqa rolga o'ta olmaysiz.\nRolni o'zgartirmoqchi bo'lsangiz:\n1️⃣ Botni o'chiring (Delete / Block)\n2️⃣ Botni qaytadan ochib /start bosing\n3️⃣ Yangi rol bilan qaytadan ro'yxatdan o'ting."
+
+def main_kb(role, locked_role=None):
     if role == "courier":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🚴 Mening kuryer panelim", callback_data="courier_panel")],
@@ -92,7 +96,19 @@ def main_kb(role):
             [InlineKeyboardButton("👥 Mijozlar", callback_data="admin_users")],
             [InlineKeyboardButton("📊 Statistika", callback_data="admin_stats")],
         ])
-    # mijoz
+    # mijoz - QULF: qulflangan mijozga boshqa rolga o'tish tugmasi umuman ko'rinmaydi.
+    # Yangi odam (hali qulf yo'q) ga 1-marta rol tanlash uchun tugmalar ko'rinadi, tanlagach ular yo'qoladi.
+    if locked_role == "client":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🍔 Buyurtma berish", callback_data="client_order")],
+            [InlineKeyboardButton("📦 Mening buyurtmalarim", callback_data="client_my")],
+        ])
+    if locked_role in ("courier", "restaurant"):
+        # Bu funksiya noto'g'ri rol bilan chaqirilsa ham - boshqa rol tugmasi chiqmasin
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🍔 Buyurtma berish", callback_data="client_order")],
+            [InlineKeyboardButton("📦 Mening buyurtmalarim", callback_data="client_my")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🍔 Buyurtma berish", callback_data="client_order")],
         [InlineKeyboardButton("📦 Mening buyurtmalarim", callback_data="client_my")],
@@ -127,7 +143,7 @@ async def send_new_window(update, context, text, reply_markup=None):
 async def show_main(update, user_id, text="Asosiy menyu:"):
     u = DB["users"].get(str(user_id), {})
     role = u.get("role", "client")
-    kb = main_kb(role)
+    kb = main_kb(role, locked_role=u.get("locked_role"))
     # YANGI OYNA: mijozda eski panelni o'chirib yangisini chiqaramiz
     try:
         ctx = None
@@ -149,6 +165,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         DB["users"][uid] = {"name": update.effective_user.first_name, "role": "client", "phone": "", "online": False, "balance": 0, "delivered": 0}
         save()
     u = DB["users"][uid]
+    # MIGRATSIYA: eski odamda 2 ta rol bo'lsa (Isco kabi) - hozirgi roliga qulflaymiz, yangi odamga tegmaymiz
+    if not u.get("locked_role"):
+        _has_hist = bool(u.get("courier_registered")) or any(v.get("admin") == update.effective_user.id for v in DB["restaurants"].values()) or any(o.get("user_id") == update.effective_user.id for o in DB["orders"].values())
+        if _has_hist:
+            u["locked_role"] = u.get("role", "client"); save()
     # Super admin har doim admin menyusini ko'radi
     if update.effective_user.id == SUPER_ADMIN:
         await update.message.reply_text(f"👑 Salom Boss!\n\nSen Super Adminsan. Qaysi rolni ko'rmoqchisan?", reply_markup=InlineKeyboardMarkup([
@@ -169,12 +190,21 @@ async def set_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
         DB["users"][uid]["role"] = role; save()
         await show_main(update, q.from_user.id, f"Rol o'zgardi: {role} ✅")
         return
-    # QULF: oddiy odam faqat o'zi ro'yxatdan o'tgan rolga o'ta oladi
+    # QULF - QATTIQ: bitta rolni tanladingmi - boshqa rolga o'tish YO'Q.
+    # Faqat o'z qulflangan rolingga o'ta olasan. Qulf yo'q bo'lsa - hali rol tanlamagansan.
     u = DB["users"].get(uid, {})
+    locked = u.get("locked_role")
+    if locked and role != locked:
+        await q.answer("⛔ Rol qulflangan!", show_alert=True)
+        await send_new_window(update, context, locked_msg(locked))
+        return
+    if not locked:
+        # Hali qulf yo'q - rolga o'tishga ruxsat, lekin qulf shu yerda qo'yilmaydi (ro'yxat tugaganda qo'yiladi)
+        pass
     has_rest = any(v.get("admin") == q.from_user.id for v in DB["restaurants"].values())
     has_courier = bool(u.get("courier_registered"))
     allowed = False
-    if role == "client": allowed = True  # hamma mijoz bo'la oladi
+    if role == "client": allowed = True
     if role == "restaurant" and has_rest: allowed = True
     if role == "courier" and has_courier: allowed = True
     if role == "admin": allowed = False
@@ -201,13 +231,9 @@ async def change_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🚴 Kuryer", callback_data="setrole_courier")],
             [InlineKeyboardButton("🏪 Restoran", callback_data="setrole_restaurant")],
         ])); return
-    # ROL QULFLANGAN: bevosita rol almashtirib bo'lmaydi - faqat qayta ro'yxatdan o'tish orqali
-    cur = DB["users"].get(str(uid), {}).get("role", "client")
-    await q.edit_message_text(f"🔒 Rolsiz qulflangan: {cur}\n\nRolni bevosita o'zgartirib bo'lmaydi.\nBoshqa rolga o'tmoqchi bo'lsangiz - o'sha rol sifatida qaytadan ro'yxatdan o'ting:",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🏪 Restoran sifatida ro'yxatdan o'tish", callback_data="register_rest")],
-            [InlineKeyboardButton("🚴 Kuryer sifatida ro'yxatdan o'tish", callback_data="register_courier")],
-            [InlineKeyboardButton("🍔 Mijoz sifatida davom etish", callback_data="setrole_client")],
+    # ROL QULFLANGAN - almashtirish tugmasi UMUMAN YO'Q. Faqat botni o'chirib qayta ro'yxatdan o'tish orqali.
+    cur = DB["users"].get(str(uid), {}).get("locked_role") or DB["users"].get(str(uid), {}).get("role", "client")
+    await send_new_window(update, context, locked_msg(cur), reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")],
         ]))
 
@@ -225,11 +251,16 @@ async def rest_card_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def register_rest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     # Oldin ro'yxatdan o'tganmi? - o'zining restorani bormi tekshiramiz
+    # QULF: boshqa rolga qulflangan bo'lsa - restoran bo'la olmaydi
+    _u_rest = DB["users"].get(str(q.from_user.id), {})
+    if _u_rest.get("locked_role") and _u_rest.get("locked_role") != "restaurant":
+        await send_new_window(update, context, locked_msg(_u_rest.get("locked_role")), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+        return
     my = [k for k,v in DB["restaurants"].items() if v.get("admin") == q.from_user.id]
     if my:
         names = ", ".join([DB["restaurants"][k]["name"] for k in my])
-        await q.edit_message_text(f"✅ Sizda allaqachon restoran bor: {names}\n\nUni boshqarish uchun Rolni o'zgartirish -> Restoran ni tanlang.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏪 Restoran panelimga kirish", callback_data="setrole_restaurant")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+        await send_new_window(update, context, f"✅ Sizda allaqachon restoran bor: {names}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏪 Restoran panelim", callback_data="rest_panel")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
         return
     context.user_data["step"] = "reg_name"
     context.user_data["reg"] = {}
@@ -307,8 +338,9 @@ async def finish_reg_with_phone(update: Update, context: ContextTypes.DEFAULT_TY
         key = f"{base}_{i}"; i+=1
     DB["restaurants"][key] = {"name": reg["name"], "admin": uid, "delivery": reg.get("delivery", 15000), "menu": reg.get("menu", {}), "active": True, "phone": DB["users"].get(str(uid), {}).get("phone","")}
     save()
-    # Avtomatik rolini restoran qilamiz
-    DB["users"][str(uid)]["role"] = "restaurant"; save()
+    # Avtomatik rolini restoran qilamiz + QULF: endi boshqa rolga o'ta olmaydi
+    DB["users"][str(uid)]["role"] = "restaurant"
+    DB["users"][str(uid)]["locked_role"] = "restaurant"; save()
     context.user_data["step"] = None
     context.user_data.pop("reg", None)
     await update.message.reply_text(f"🎉 *Tabriklaymiz! Restoraningiz ro'yxatdan o'tdi!*\n\n🏪 {reg['name']}\n🍔 {len(reg.get('menu',{}))} ta taom\n🚚 Yetkazish: {reg.get('delivery',15000):,} so'm\n\nEndi mijozlar sizni ro'yxatda ko'radi. Buyurtma tushsa shu yerga keladi.\nMenyuni o'zgartirish uchun: Restoran panelingizni oching",
@@ -328,6 +360,10 @@ def _my_rest(uid):
 
 async def rest_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
+    _u_rp = DB["users"].get(str(q.from_user.id), {})
+    if _u_rp.get("locked_role") and _u_rp.get("locked_role") != "restaurant":
+        await send_new_window(update, context, locked_msg(_u_rp.get("locked_role")), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+        return
     key, r = _my_rest(q.from_user.id)
     if not r:
         await q.edit_message_text("❌ Sizda restoran yo'q. Avval ro'yxatdan o'ting.",
@@ -489,6 +525,10 @@ async def register_courier(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     uid = str(q.from_user.id)
     u = DB["users"].get(uid, {})
+    # QULF: boshqa rolga qulflangan bo'lsa - kuryer bo'la olmaydi
+    if u.get("locked_role") and u.get("locked_role") != "courier":
+        await send_new_window(update, context, locked_msg(u.get("locked_role")), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+        return
     if u.get("courier_registered"):
         await courier_new(q, context, f"✅ Siz allaqachon kuryer sifatida ro'yxatdan o'tgansiz.\n\n🚴 Transport: {u.get('courier_transport','-')}\n📍 Hudud: {u.get('courier_area','-')}\n💰 Balans: {u.get('balance',0):,} so'm",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Kuryer panelim", callback_data="courier_panel")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
@@ -541,6 +581,9 @@ async def courier_msg_new(update, context, text, reply_markup=None, parse_mode=N
 async def courier_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     uid = str(q.from_user.id); u = DB["users"].get(uid, {})
+    if u.get("locked_role") and u.get("locked_role") != "courier":
+        await courier_new(q, context, locked_msg(u.get("locked_role")), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+        return
     if not u.get("courier_registered"):
         await courier_new(q, context, "❌ Avval kuryer sifatida ro'yxatdan o'ting.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Ro'yxatdan o'tish", callback_data="register_courier")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
@@ -752,6 +795,9 @@ async def finish_courier_reg_with_phone(update: Update, context: ContextTypes.DE
     _rc2 = context.user_data.get("reg_courier", {})
     DB["users"][uid]["courier_login"] = _rc2.get("login", "")
     DB["users"][uid]["courier_pass_hash"] = _rc2.get("pass_hash", "")
+    # QULF: kuryer bo'ldi - endi boshqa rolga o'ta olmaydi
+    DB["users"][uid]["locked_role"] = "courier"
+    DB["users"][uid]["role"] = "courier"
     save()
     context.user_data["step"] = None
     context.user_data["courier_logged_in"] = True
@@ -765,6 +811,11 @@ async def finish_courier_reg_with_phone(update: Update, context: ContextTypes.DE
 # --- MIJOZ ---
 async def client_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
+    # QULF: kuryer/restoran mijoz bo'lib buyurtma berolmaydi
+    _u_co = DB["users"].get(str(q.from_user.id), {})
+    if _u_co.get("locked_role") and _u_co.get("locked_role") != "client":
+        await send_new_window(update, context, locked_msg(_u_co.get("locked_role")), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+        return
     kb = [[InlineKeyboardButton(r["name"], callback_data=f"cafe_{key}")] for key, r in DB["restaurants"].items() if r.get("active")]
     kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")])
     try: await q.message.delete()
@@ -885,6 +936,9 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     oid = DB["counter"]; DB["counter"] += 1
     uid = str(update.effective_user.id)
     payment = context.user_data.get("payment", "Naqd 💵")
+    # QULF: mijoz birinchi buyurtma berdi - endi mijoz roliga qulflanadi, boshqa rolga o'ta olmaydi
+    if not DB["users"][uid].get("locked_role"):
+        DB["users"][uid]["locked_role"] = "client"; DB["users"][uid]["role"] = "client"
     DB["orders"][str(oid)] = {"id": oid, "cafe": cafe_key, "cart": cart, "total": total, "payment": payment, "user_id": int(uid), "name": DB["users"][uid]["name"], "phone": DB["users"][uid].get("phone",""), "address": address, "status": "waiting", "courier_id": None, "created": "now"}
     save()
     context.user_data["step"] = None
