@@ -996,7 +996,8 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         order["channel_msg_id"] = _cm.message_id; save()
     except Exception as e: print("Kanal xato:", e)
     for uid, u in DB["users"].items():
-        if u.get("role") == "courier" and u.get("online"):
+        # ANTI-NAYRANG: buyurtma egasi online kuryer bo'lsa ham - unga shaxsiy xabar bilan yuborilmaydi, guruhda ham o'zi ololmaydi
+        if u.get("role") == "courier" and u.get("online") and int(uid) != order["user_id"]:
             try: await context.bot.send_message(chat_id=int(uid), text=ctext, reply_markup=ckb)
             except: pass
 
@@ -1015,7 +1016,8 @@ async def courier_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def courier_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
-    orders = [o for o in DB["orders"].values() if o["status"] == "to_courier"]
+    # ANTI-NAYRANG: o'z buyurtmang ro'yxatda ko'rinmaydi - olib ketmasin deb
+    orders = [o for o in DB["orders"].values() if o["status"] == "to_courier" and o.get("user_id") != q.from_user.id]
     if not orders: await courier_new(q, context, "Hozircha bo'sh buyurtma yo'q.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]])); return
     kb = []
     for o in orders:
@@ -1038,6 +1040,14 @@ async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("Bu buyurtma allaqachon olingan!", show_alert=True); return
         if str(q.from_user.id) not in DB["users"]:
             await q.answer("Avval botda /start bosib kuryer sifatida ro'yxatdan o'ting!", show_alert=True); return
+        # ANTI-NAYRANG: o'z buyurtmasini o'zi ololmaydi! Mijoz = Kuryer bo'lsa - TAQIQ
+        if order.get("user_id") == q.from_user.id:
+            await q.answer("⛔ O'z buyurtmangizni o'zingiz ololmaysiz! Bu nayrang hisoblanadi.", show_alert=True)
+            try: await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"🚨 NAYRANG URINISHI!\n👤 {q.from_user.first_name} | ID: {q.from_user.id}\nO'z buyurtmasi #{oid} ni o'zi olishga urindi (kanal/guruhdan).")
+            except: pass
+            # Hisobga belgilaymiz
+            _uc = DB["users"].get(str(q.from_user.id), {}); _uc["cheat_tries"] = _uc.get("cheat_tries", 0) + 1; save()
+            return
         if DB["users"][str(q.from_user.id)].get("courier_pass_hash") and not context.user_data.get("courier_logged_in"):
             await q.answer("⛔ Avval botga kirib login + parol bilan kiring! Keyin buyurtma oling.", show_alert=True)
             try: await context.bot.send_message(chat_id=q.from_user.id, text="⛔ Buyurtma olish uchun avval kiring:\n\nBotda /start bosing → Kuryer panelim → login + parolni yozing.")
@@ -1065,6 +1075,13 @@ async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # TUZATILDI: foydalanuvchi DB da bo'lmasa - KeyError bilan yiqilmasin
     if str(q.from_user.id) not in DB["users"]:
         await q.answer("Avval botda /start bosib kuryer sifatida ro'yxatdan o'ting!", show_alert=True); return
+    # ANTI-NAYRANG: o'z buyurtmasini o'zi ololmaydi (shaxsiy chatdan ham)
+    if order.get("user_id") == q.from_user.id:
+        await q.answer("⛔ O'z buyurtmangizni o'zingiz ololmaysiz! Bu nayrang hisoblanadi.", show_alert=True)
+        try: await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"🚨 NAYRANG URINISHI!\n👤 {q.from_user.first_name} | ID: {q.from_user.id}\nO'z buyurtmasi #{oid} ni o'zi olishga urindi.")
+        except: pass
+        _uc2 = DB["users"].get(str(q.from_user.id), {}); _uc2["cheat_tries"] = _uc2.get("cheat_tries", 0) + 1; save()
+        return
     # LOGIN/PAROL: paroli bor, lekin hali kirmagan kuryer buyurtma ololmaydi - birovning nomidan olib ketmasin
     _u_take = DB["users"][str(q.from_user.id)]
     if _u_take.get("courier_pass_hash") and not context.user_data.get("courier_logged_in"):
@@ -1088,6 +1105,12 @@ async def courier_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     oid = str(q.data.split("_")[1]); order = DB["orders"].get(oid)
     if not order: return
+    # ANTI-NAYRANG: o'z buyurtmangga "yetkazdim" bosolmaysan
+    if order.get("user_id") == q.from_user.id:
+        await q.answer("⛔ O'z buyurtmangizga 'yetkazdim' bosolmaysiz!", show_alert=True)
+        try: await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"🚨 NAYRANG: {q.from_user.first_name} o'z buyurtmasi #{oid} ga 'yetkazdim' bosishga urindi.")
+        except: pass
+        return
     order["status"] = "done"; save()
     uid = str(q.from_user.id)
     if uid not in DB["users"]: DB["users"][uid] = {"name": q.from_user.first_name, "role": "courier", "balance": 0, "delivered": 0}
@@ -1117,6 +1140,10 @@ async def on_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
             order = DB["orders"].get(int(oid)) if oid.isdigit() else None
         if not order:
             await q.edit_message_text(f"Buyurtma topilmadi. oid={oid}")
+            return
+        # ANTI-NAYRANG: o'zini o'zi baholay olmaydi
+        if order.get("user_id") == q.from_user.id and order.get("courier_id") == q.from_user.id:
+            await q.edit_message_text("⛔ O'z-o'zingizni baholay olmaysiz!")
             return
         courier_name = order.get("courier_name") or order.get("courier") or "Kuryer"
         if "ratings" not in DB: DB["ratings"] = []
