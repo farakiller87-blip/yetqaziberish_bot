@@ -87,6 +87,14 @@ def main_kb(role, locked_role=None):
             [InlineKeyboardButton("🚴 Mening buyurtmam", callback_data="courier_my")],
             [InlineKeyboardButton("💰 Mening hisobim", callback_data="courier_balance_new")],
         ])
+    if role == "grocery":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🛒 Mening do'kon panelim", callback_data="groc_panel")],
+            [InlineKeyboardButton("📦 Yangi buyurtmalar", callback_data="rest_orders")],
+            [InlineKeyboardButton("📦 Mahsulotlarni boshqarish", callback_data="groc_menu_manage")],
+            [InlineKeyboardButton("📊 Bugungi statistika", callback_data="groc_stats")],
+            [InlineKeyboardButton("📍 Do'kon joylashuvim (xarita)", callback_data="groc_loc")],
+        ])
     if role == "restaurant":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🏪 Mening restoran panelim", callback_data="rest_panel")],
@@ -190,6 +198,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🍔 Mijoz sifatida", callback_data="setrole_client")],
             [InlineKeyboardButton("🚴 Kuryer sifatida", callback_data="setrole_courier")],
             [InlineKeyboardButton("🏪 Restoran sifatida", callback_data="setrole_restaurant")],
+            [InlineKeyboardButton("🛒 Do'kon (Oziq-ovqat) sifatida", callback_data="setrole_grocery")],
         ]))
         return
     await show_main(update, update.effective_user.id, f"Salom {u['name']}! 👋\n\nSizning rolingiz: {u['role']} 🔒")
@@ -215,16 +224,21 @@ async def set_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Hali qulf yo'q - rolga o'tishga ruxsat, lekin qulf shu yerda qo'yilmaydi (ro'yxat tugaganda qo'yiladi)
         pass
     has_rest = any(v.get("admin") == q.from_user.id for v in DB["restaurants"].values())
+    has_groc = any(v.get("admin") == q.from_user.id for v in DB.get("groceries", {}).values())
     has_courier = bool(u.get("courier_registered"))
     allowed = False
     if role == "client": allowed = True
     if role == "restaurant" and has_rest: allowed = True
+    if role == "grocery" and has_groc: allowed = True
     if role == "courier" and has_courier: allowed = True
     if role == "admin": allowed = False
     if not allowed:
         if role == "restaurant":
             await q.edit_message_text("❌ Siz restoran sifatida ro'yxatdan o'tmagansiz.\n\nAvval restoran sifatida ro'yxatdan o'ting, keyin panelga kirasiz.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏪 Restoran sifatida ro'yxatdan o'tish", callback_data="register_rest")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+        elif role == "grocery":
+            await q.edit_message_text("❌ Siz do'kon sifatida ro'yxatdan o'tmagansiz.\n\nAvval do'kon sifatida ro'yxatdan o'ting, keyin panelga kirasiz.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Do'kon sifatida ro'yxatdan o'tish", callback_data="register_groc")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
         elif role == "courier":
             await q.edit_message_text("❌ Siz kuryer sifatida ro'yxatdan o'tmagansiz.\n\nAvval kuryer sifatida ro'yxatdan o'ting.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Kuryer sifatida ro'yxatdan o'tish", callback_data="register_courier")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
@@ -1363,7 +1377,7 @@ async def groc_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not r.get("approved", False):
         await send_new_window(update, context, f"⏳ *{r['name']}* - tasdiqlash kutilmoqda.\n\nSuper Admin tasdiqlaganda panel ochiladi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]), parse_mode="Markdown"); return
     txt = f"🛒 *{r['name']} - Do'kon paneli*\n\n📦 Mahsulotlar: {len(r.get('menu', {}))} ta\n🚚 Yetkazish: {r.get('delivery', 15000):,} so'm\n{'🟢 Ochiq' if r.get('active') else '🔴 Yopiq'}\n💳 Karta: {r.get('payme_card', 'Kiritilmagan')}"
-    kb = [[InlineKeyboardButton("➕ Yangi mahsulot qo'shish", callback_data="groc_add")],[InlineKeyboardButton("📸 Mahsulotga rasm qo'shish", callback_data="groc_photo_ask")],[InlineKeyboardButton("💰 Narxni o'zgartirish", callback_data="groc_price_list")],[InlineKeyboardButton("❌ Tugadi / Bor qilish", callback_data="groc_menu_manage")],[InlineKeyboardButton("🚚 Yetkazish narxini o'zgartirish", callback_data="groc_delivery")],[InlineKeyboardButton("💳 Payme / Click karta raqamim", callback_data="groc_card")],[InlineKeyboardButton("🟢 Ochiq / 🔴 Yopiq", callback_data="groc_open")],[InlineKeyboardButton("📊 Bugungi statistika", callback_data="groc_stats")],[InlineKeyboardButton("⬅️ Asosiy", callback_data="back_main")]]
+    kb = [[InlineKeyboardButton("➕ Yangi mahsulot qo'shish", callback_data="groc_add")],[InlineKeyboardButton("📸 Mahsulotga rasm qo'shish", callback_data="groc_photo_ask")],[InlineKeyboardButton("💰 Narxni o'zgartirish", callback_data="groc_price_list")],[InlineKeyboardButton("❌ Tugadi / Bor qilish", callback_data="groc_menu_manage")],[InlineKeyboardButton("📍 Do'kon joylashuvim (xarita)", callback_data="groc_loc")],[InlineKeyboardButton("🚚 Yetkazish narxini o'zgartirish", callback_data="groc_delivery")],[InlineKeyboardButton("💳 Payme / Click karta raqamim", callback_data="groc_card")],[InlineKeyboardButton("🟢 Ochiq / 🔴 Yopiq", callback_data="groc_open")],[InlineKeyboardButton("📊 Bugungi statistika", callback_data="groc_stats")],[InlineKeyboardButton("⬅️ Asosiy", callback_data="back_main")]]
     await send_new_window(update, context, txt, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
 
 async def groc_add_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1489,6 +1503,7 @@ async def handle_groc_panel_text(update: Update, context: ContextTypes.DEFAULT_T
         _slug = "".join(c for c in context.user_data.get("groc_name", "shop").lower() if c.isalnum())[:15] or f"shop{update.effective_user.id}"
         _slug = f"{_slug}_{update.effective_user.id % 10000}"
         DB.setdefault("groceries", {})[_slug] = {"name": context.user_data.get("groc_name"), "admin": update.effective_user.id, "delivery": 12000, "menu": {}, "menu_photos": {}, "sold_out": [], "active": True, "approved": False, "stir": context.user_data.get("groc_stir"), "guvohnoma": context.user_data.get("groc_guvohnoma"), "phone": text}
+        DB["users"][str(update.effective_user.id)]["locked_role"] = "grocery"; DB["users"][str(update.effective_user.id)]["role"] = "grocery"
         save(); context.user_data["step"] = None
         # Super Admin ga tasdiqlash uchun
         try: await context.bot.send_message(chat_id=SUPER_ADMIN_ID, text=f"🛒 *YANGI OZIQ-OVQAT DO'KONI - Tasdiqlash kutilmoqda!*\n\n🏪 Do'kon: {context.user_data.get('groc_name')}\n🪪 STIR: {context.user_data.get('groc_stir')}\n📄 Guvohnoma: {context.user_data.get('groc_guvohnoma')}\n📞 Tel: {text}\n👤 Admin ID: {update.effective_user.id}", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"admin_groc_approve_{update.effective_user.id}")],[InlineKeyboardButton("❌ Rad etish", callback_data=f"admin_groc_reject_{update.effective_user.id}")]]))
