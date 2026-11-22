@@ -490,12 +490,12 @@ async def register_courier(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(q.from_user.id)
     u = DB["users"].get(uid, {})
     if u.get("courier_registered"):
-        await q.edit_message_text(f"✅ Siz allaqachon kuryer sifatida ro'yxatdan o'tgansiz.\n\n🚴 Transport: {u.get('courier_transport','-')}\n📍 Hudud: {u.get('courier_area','-')}\n💰 Balans: {u.get('balance',0):,} so'm",
+        await courier_new(q, context, f"✅ Siz allaqachon kuryer sifatida ro'yxatdan o'tgansiz.\n\n🚴 Transport: {u.get('courier_transport','-')}\n📍 Hudud: {u.get('courier_area','-')}\n💰 Balans: {u.get('balance',0):,} so'm",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Kuryer panelim", callback_data="courier_panel")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
         return
     context.user_data["step"] = "regcourier_transport"
     context.user_data["reg_courier"] = {}
-    await q.edit_message_text("🚴 *Kuryer sifatida ro'yxatdan o'tish*\n\n1-qadam: Transportingizni tanlang:",
+    _m = await courier_new(q, context, "🚴 *Kuryer sifatida ro'yxatdan o'tish*\n\n1-qadam: Transportingizni tanlang:",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🛵 Moped / Skuter", callback_data="courier_tr_moped")],
             [InlineKeyboardButton("🚗 Mashina", callback_data="courier_tr_car")],
@@ -503,6 +503,8 @@ async def register_courier(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🚶 Piyoda", callback_data="courier_tr_walk")],
             [InlineKeyboardButton("❌ Bekor qilish", callback_data="back_main")],
         ]), parse_mode="Markdown")
+    try: context.user_data["courier_panel_msg_id"] = _m.message_id
+    except: pass
 
 async def register_courier_transport(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -510,8 +512,31 @@ async def register_courier_transport(update: Update, context: ContextTypes.DEFAU
     tr = tr_map.get(q.data, "🛵 Moped")
     context.user_data["reg_courier"] = {"transport": tr}
     context.user_data["step"] = "regcourier_area"
-    await q.edit_message_text(f"✅ Transport: {tr}\n\n2-qadam: Qaysi hududda ishlaysiz? Yozing:\nMasalan: Yashil Bozor, 5-kichik daxa, Aeroport\nYoki: Butun Termiz",
+    _m2 = await courier_new(q, context, f"✅ Transport: {tr}\n\n2-qadam: Qaysi hududda ishlaysiz? Yozing:\nMasalan: Yashil Bozor, 5-kichik daxa, Aeroport\nYoki: Butun Termiz",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="back_main")]]))
+    try: context.user_data["courier_panel_msg_id"] = _m2.message_id
+    except: pass
+
+async def courier_new(q, context, text, reply_markup=None, parse_mode=None):
+    """KURYER YANGI OYNA: eski oyna o'chadi, bitta yangi oyna qoladi."""
+    try: await q.message.delete()
+    except: pass
+    _mm = await context.bot.send_message(chat_id=q.from_user.id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
+    try: context.user_data["courier_panel_msg_id"] = _mm.message_id
+    except: pass
+    return _mm
+
+async def courier_msg_new(update, context, text, reply_markup=None, parse_mode=None):
+    """Kuryer yozgan xabar (matn/kontakt) dan keyin - eski bot oynasi + mijoz yozgan xabar o'chadi."""
+    old = context.user_data.get("courier_panel_msg_id")
+    if old:
+        try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=old)
+        except: pass
+    try: await update.message.delete()
+    except: pass
+    m = await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
+    context.user_data["courier_panel_msg_id"] = m.message_id
+    return m
 
 async def courier_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -532,7 +557,7 @@ async def courier_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("✏️ Transport / Hududni o'zgartirish", callback_data="courier_edit")],
         [InlineKeyboardButton("⬅️ Asosiy", callback_data="back_main")],
     ])
-    await q.edit_message_text(txt, reply_markup=kb, parse_mode="Markdown")
+    await courier_new(q, context, txt, reply_markup=kb, parse_mode="Markdown")
 
 async def courier_balance_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -542,7 +567,7 @@ async def courier_balance_new(update: Update, context: ContextTypes.DEFAULT_TYPE
     for o in my_done[-5:]:
         txt += f"#{o['id']} | {o.get('total',0):,} so'm | +15 000 ga yaqin\n"
     txt += "\nHar bir yetkazilgan buyurtma uchun +15 000 so'm (yoki restoran yetkazish narxi) qo'shiladi."
-    await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([
+    await courier_new(q, context, txt, reply_markup=InlineKeyboardMarkup([
         [InlineKeyboardButton("💰 Pulni yechish so'rovi", callback_data="courier_withdraw")],
         [InlineKeyboardButton("⬅️ Panel", callback_data="courier_panel")],
     ]), parse_mode="Markdown")
@@ -554,12 +579,12 @@ async def courier_withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # TUZATILDI: oldin 30 000 edi, endi 1 ta yetkazish (15 000) dan ham yechish mumkin
     # Agar balans 0 bo'lsa - aniq yozuv bilan tushuntiramiz, faqat alert emas
     if bal <= 0:
-        await _edit_q(q, f"💰 Balansingiz: 0 so'm\n\nHali pul yechib bo'lmaydi - avval buyurtma yetkazib pul ishlang.\nHar bir yetkazish uchun +15 000 so'm qo'shiladi.",
+        await courier_new(q, context, f"💰 Balansingiz: 0 so'm\n\nHali pul yechib bo'lmaydi - avval buyurtma yetkazib pul ishlang.\nHar bir yetkazish uchun +15 000 so'm qo'shiladi.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📦 Bo'sh buyurtmalar", callback_data="courier_list")],[InlineKeyboardButton("⬅️ Panel", callback_data="courier_panel")]]))
         return
     context.user_data["step"] = "courier_withdraw_card"
     context.user_data["withdraw_amount"] = bal
-    await _edit_q(q, f"💰 Balansingiz: {bal:,} so'm\n\nPulni qaysi kartaga o'tkazaylik? Karta raqamini yozing (16 ta raqam):\nMasalan: 8600 1234 5678 9012\n\nSo'rov yuboriladi, admin to'lab beradi.",
+    await courier_new(q, context, f"💰 Balansingiz: {bal:,} so'm\n\nPulni qaysi kartaga o'tkazaylik? Karta raqamini yozing (16 ta raqam):\nMasalan: 8600 1234 5678 9012\n\nSo'rov yuboriladi, admin to'lab beradi.",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="courier_panel")]]))
 
 async def courier_withdraw_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -590,7 +615,7 @@ async def courier_withdraw_reject(update: Update, context: ContextTypes.DEFAULT_
 async def courier_edit_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     context.user_data["step"] = "courier_edit_area"
-    await q.edit_message_text("✏️ Yangi hududingizni yozing:\nMasalan: Yashil Bozor, Aeroport",
+    await courier_new(q, context, "✏️ Yangi hududingizni yozing:\nMasalan: Yashil Bozor, Aeroport",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="courier_panel")]]))
 
 async def handle_courier_reg_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -605,26 +630,26 @@ async def handle_courier_reg_text(update: Update, context: ContextTypes.DEFAULT_
         rc["area"] = text
         context.user_data["reg_courier"] = rc
         context.user_data["step"] = "regcourier_phone"
-        await update.message.reply_text(f"✅ Hudud: {text}\n\n3-qadam: Telefon raqamingizni yuboring 👇",
+        await courier_msg_new(update, context, f"✅ Hudud: {text}\n\n3-qadam: Telefon raqamingizni yuboring 👇",
             reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📞 Raqamni yuborish", request_contact=True)]], resize_keyboard=True, one_time_keyboard=True))
         return True
     if step == "courier_edit_area":
         DB["users"][uid]["courier_area"] = text; save()
         context.user_data["step"] = None
-        await update.message.reply_text(f"✅ Hududingiz o'zgardi: {text}",
+        await courier_msg_new(update, context, f"✅ Hududingiz o'zgardi: {text}",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Panelga qaytish", callback_data="courier_panel")]]))
         return True
     if step == "courier_withdraw_card":
         card = text.replace(" ", "")
         if len(card) < 16 or not card.isdigit():
-            await update.message.reply_text("❌ Karta raqami 16 ta raqam bo'lishi kerak. Qaytadan yozing:"); return True
+            await courier_msg_new(update, context, "❌ Karta raqami 16 ta raqam bo'lishi kerak. Qaytadan yozing:"); return True
         u = DB["users"][uid]; bal = u.get("balance", 0)
         # So'rovni Super Adminga yuboramiz, balansni nolga tushirmaymiz - admin tasdiqlagach to'lanadi
         try: await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"💸 *PUL YECHISH SO'ROVI*\n\n🚴 Kuryer: {u.get('name')} | ID: {uid}\n📞 {u.get('phone')}\n💰 Summa: {bal:,} so'm\n💳 Karta: {card[:4]} **** **** {card[-4:]}\n\nTo'laganingizdan keyin kuryer balansini qo'lda nollang.",
                 parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ TO'LADIM - Tasdiqlash", callback_data=f"wdok_{uid}_{bal}"), InlineKeyboardButton("❌ Rad etish", callback_data=f"wdno_{uid}_{bal}")]]))
         except: pass
         context.user_data["step"] = None
-        await update.message.reply_text(f"✅ So'rovingiz yuborildi!\n💰 {bal:,} so'm\n💳 Karta: **** {card[-4:]}\n\nAdmin tez orada to'laydi, to'langach sizga xabar keladi.",
+        await courier_msg_new(update, context, f"✅ So'rovingiz yuborildi!\n💰 {bal:,} so'm\n💳 Karta: **** {card[-4:]}\n\nAdmin tez orada to'laydi, to'langach sizga xabar keladi.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Panelga qaytish", callback_data="courier_panel")]]))
         return True
     return False
@@ -643,7 +668,7 @@ async def finish_courier_reg_with_phone(update: Update, context: ContextTypes.DE
     save()
     context.user_data["step"] = None
     context.user_data.pop("reg_courier", None)
-    await update.message.reply_text(f"🎉 *Tabriklaymiz! Kuryer sifatida ro'yxatdan o'tdingiz!*\n\n🚗 Transport: {rc.get('transport')}\n📍 Hudud: {rc.get('area')}\n\nEndi ONLINE bo'ling - buyurtmalar sizga keladi. Har bir yetkazgan buyurtma uchun hisobingizga pul qo'shiladi.",
+    await courier_msg_new(update, context, f"🎉 *Tabriklaymiz! Kuryer sifatida ro'yxatdan o'tdingiz!*\n\n🚗 Transport: {rc.get('transport')}\n📍 Hudud: {rc.get('area')}\n\nEndi ONLINE bo'ling - buyurtmalar sizga keladi. Har bir yetkazgan buyurtma uchun hisobingizga pul qo'shiladi.",
         parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Kuryer panelim", callback_data="courier_panel")]]))
     try: await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"🆕 Yangi kuryer ro'yxatdan o'tdi!\n🚴 {update.effective_user.first_name} | ID: {uid}\n🚗 {rc.get('transport')} | 📍 {rc.get('area')}\n📞 {DB['users'][uid].get('phone','')}")
     except: pass
@@ -890,7 +915,7 @@ async def courier_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = DB["users"][uid]
     if not u.get("phone"):
         context.user_data["step"] = "courier_phone"
-        await q.message.reply_text("Avval telefon raqamingizni yuboring:", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📞 Raqamni yuborish", request_contact=True)]], resize_keyboard=True, one_time_keyboard=True))
+        await courier_new(q, context, "Avval telefon raqamingizni yuboring:", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📞 Raqamni yuborish", request_contact=True)]], resize_keyboard=True, one_time_keyboard=True))
         return
     u["online"] = not u.get("online"); save()
     await q.answer("ONLINE ✅" if u["online"] else "OFFLINE 🔴")
@@ -899,12 +924,12 @@ async def courier_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def courier_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     orders = [o for o in DB["orders"].values() if o["status"] == "to_courier"]
-    if not orders: await q.edit_message_text("Hozircha bo'sh buyurtma yo'q.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]])); return
+    if not orders: await courier_new(q, context, "Hozircha bo'sh buyurtma yo'q.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]])); return
     kb = []
     for o in orders:
         kb.append([InlineKeyboardButton(f"#{o['id']} | {DB['restaurants'][o['cafe']]['name']} | {o['total']} so'm | {o['address'][:30]}", callback_data=f"take_{o['id']}")])
     kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")])
-    await q.edit_message_text("📦 Bo'sh buyurtmalar:", reply_markup=InlineKeyboardMarkup(kb))
+    await courier_new(q, context, "📦 Bo'sh buyurtmalar:", reply_markup=InlineKeyboardMarkup(kb))
 
 async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -914,7 +939,7 @@ async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("Bu buyurtma allaqachon olingan!"); return
     order["status"] = "taken"; order["courier_id"] = q.from_user.id; order["courier_name"] = q.from_user.first_name; save()
     u = DB["users"][str(q.from_user.id)]
-    await _edit_q(q, f"✅ Buyurtma #{oid} seniki!\n\n📍 Manzil: {order['address']}\n📞 Mijoz: {order['phone']}\n💰 {order['total']} so'm\n\nYetkazib bo'lgach pastni bos:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ YETKAZDIM", callback_data=f"done_{oid}")]]))
+    await courier_new(q, context, f"✅ Buyurtma #{oid} seniki!\n\n📍 Manzil: {order['address']}\n📞 Mijoz: {order['phone']}\n💰 {order['total']} so'm\n\nYetkazib bo'lgach pastni bos:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ YETKAZDIM", callback_data=f"done_{oid}")]]))
     await context.bot.send_message(chat_id=order["user_id"], text=f"🚴 Kuryer {u['name']} yo'lga chiqdi! Buyurtma #{oid} yo'lda.")
     # Restoranga ham xabar
     await context.bot.send_message(chat_id=DB["restaurants"][order["cafe"]]["admin"], text=f"🚴 Kuryer {u['name']} buyurtma #{oid} ni oldi.")
@@ -925,7 +950,7 @@ async def courier_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not order: return
     order["status"] = "done"; save()
     uid = str(q.from_user.id); DB["users"][uid]["delivered"] = DB["users"][uid].get("delivered", 0) + 1; DB["users"][uid]["balance"] = DB["users"][uid].get("balance", 0) + 15000; save()
-    await _edit_q(q, f"✅ Buyurtma #{oid} yetkazildi! +15000 so'm hisobingga qo'shildi.")
+    await courier_new(q, context, f"✅ Buyurtma #{oid} yetkazildi! +15000 so'm hisobingga qo'shildi.")
     await context.bot.send_message(chat_id=order["user_id"], text=f"✅ Buyurtmangiz #{oid} yetkazildi! Yoqimli ishtaha 😋\n\nKuryerni baholang:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⭐️⭐️⭐️⭐️⭐️", callback_data=f"rate_5_{oid}"), InlineKeyboardButton("⭐️⭐️⭐️", callback_data=f"rate_3_{oid}")]]))
     await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"✅ #{oid} yetkazildi. Kuryer: {DB['users'][uid]['name']}")
 
@@ -976,8 +1001,8 @@ async def generic_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif q.data == "client_order": await client_order(update, context)
     elif q.data == "courier_my":
         oid_list = [o for o in DB["orders"].values() if o.get("courier_id") == q.from_user.id and o["status"] == "taken"]
-        if not oid_list: await q.edit_message_text("Hozircha olingan buyurtmang yo'q.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]])); return
-        o = oid_list[0]; await q.edit_message_text(f"🚴 Buyurtma #{o['id']}\n📍 {o['address']}\n📞 {o['phone']}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ YETKAZDIM", callback_data=f"done_{o['id']}")]]))
+        if not oid_list: await courier_new(q, context, "Hozircha olingan buyurtmang yo'q.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]])); return
+        o = oid_list[0]; await courier_new(q, context, f"🚴 Buyurtma #{o['id']}\n📍 {o['address']}\n📞 {o['phone']}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ YETKAZDIM", callback_data=f"done_{o['id']}")]]))
     elif q.data == "courier_balance":
         u = DB["users"][str(q.from_user.id)]; await q.edit_message_text(f"💰 Balans: {u.get('balance',0)} so'm\n✅ Yetkazgan: {u.get('delivered',0)} ta", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
     elif q.data == "client_my":
