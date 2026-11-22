@@ -125,6 +125,7 @@ def main_kb(role, locked_role=None):
         [InlineKeyboardButton("💰 Mening hisobim", callback_data="client_balance")],
         [InlineKeyboardButton("➕ Hisobni to'ldirish", callback_data="client_topup")],
         [InlineKeyboardButton("🏪 Restoran sifatida ro'yxatdan o'tish", callback_data="register_rest")],
+        [InlineKeyboardButton("🛒 Do'kon (Oziq-ovqat) sifatida ro'yxatdan o'tish", callback_data="register_groc")],
         [InlineKeyboardButton("🚴 Kuryer sifatida ro'yxatdan o'tish", callback_data="register_courier")],
     ])
 
@@ -2429,6 +2430,25 @@ async def main():
     app.add_handler(CallbackQueryHandler(rest_delivery_ask, pattern="^rest_delivery$"))
     app.add_handler(CallbackQueryHandler(rest_loc_ask, pattern="^rest_loc$"))
     app.add_handler(CallbackQueryHandler(groc_loc_ask, pattern="^groc_loc$"))
+    # --- BOSH SAHIFA TANLOVI: Restoranlar / Oziq-ovqat --- BU HANDLERLAR BO'LMAGANI UCHUN OZIQ-OVQAT OCHILMAYOTGAN EDI!
+    app.add_handler(CallbackQueryHandler(rest_list, pattern="^rest_list$"))
+    app.add_handler(CallbackQueryHandler(groc_list, pattern="^groc_list$"))
+    # --- OZIQ-OVQAT DO'KONI: ro'yxat + panel (aniq patternlar avval) ---
+    app.add_handler(CallbackQueryHandler(register_groc, pattern="^register_groc$"))
+    app.add_handler(CallbackQueryHandler(groc_panel, pattern="^groc_panel$"))
+    app.add_handler(CallbackQueryHandler(groc_add_ask, pattern="^groc_add$"))
+    app.add_handler(CallbackQueryHandler(groc_photo_ask, pattern="^groc_photo_ask$"))
+    app.add_handler(CallbackQueryHandler(groc_photo_pick, pattern="^groc_photo_"))
+    app.add_handler(CallbackQueryHandler(groc_price_list, pattern="^groc_price_list$"))
+    app.add_handler(CallbackQueryHandler(groc_price_ask, pattern="^groc_price_"))
+    app.add_handler(CallbackQueryHandler(groc_menu_manage, pattern="^groc_menu$"))
+    app.add_handler(CallbackQueryHandler(groc_toggle_item, pattern="^groc_toggle_"))
+    app.add_handler(CallbackQueryHandler(groc_delivery_ask, pattern="^groc_delivery$"))
+    app.add_handler(CallbackQueryHandler(groc_card_ask, pattern="^groc_card$"))
+    app.add_handler(CallbackQueryHandler(groc_open_toggle, pattern="^groc_open$"))
+    app.add_handler(CallbackQueryHandler(groc_stats, pattern="^groc_stats$"))
+    # Umumiy groc_ (do'kon menyusi) - eng oxirida, yuqoridagilarni yopib qo'ymasligi uchun
+    app.add_handler(CallbackQueryHandler(groc_menu, pattern="^groc_"))
     app.add_handler(CallbackQueryHandler(rest_open_toggle, pattern="^rest_open$"))
     app.add_handler(CallbackQueryHandler(rest_stats_new, pattern="^rest_stats_new$"))
     app.add_handler(CallbackQueryHandler(rest_card_ask, pattern="^rest_card$"))
