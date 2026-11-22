@@ -24,6 +24,8 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SUPER_ADMIN = 6738827993
+# SUPER ADMIN KOMISSIYASI: har bir yakunlangan buyurtma uchun restoran Super Adminga to'laydi (mijozdan emas, restorandan!)
+COMMISSION_PER_ORDER = 2000  # so'm - hozir 2000, keyin 3000 ga oshirish mumkin
 # MIJOZ HISOBINI TO'LDIRISH UCHUN ADMIN KARTASI - shu yerga adminning Click/Payme kartasini yozing
 TOPUP_CARD = "8600 0000 0000 0000"  # <-- O'ZGARTIRING: admin kartasi
 TOPUP_CARD_OWNER = "Admin"
@@ -96,6 +98,7 @@ def main_kb(role, locked_role=None):
             [InlineKeyboardButton("📦 Barcha buyurtmalar", callback_data="admin_orders")],
             [InlineKeyboardButton("🏪 Restoranlar", callback_data="admin_rests")],
         [InlineKeyboardButton("ℹ️ Pul tartibi: Super Admin pulga aralashmaydi", callback_data="admin_money_info")],
+        [InlineKeyboardButton("📊 Restoranlar qarzi (faqat senga)", callback_data="admin_debt_report")],
             [InlineKeyboardButton("🚴 Kuryerlar", callback_data="admin_couriers")],
             [InlineKeyboardButton("👥 Mijozlar", callback_data="admin_users")],
             [InlineKeyboardButton("📊 Statistika", callback_data="admin_stats")],
@@ -1677,6 +1680,28 @@ async def admin_rest_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try: await context.bot.send_message(chat_id=uid, text=f"❌ *Restoraningiz RAD ETILDI!*\n\n🏪 {name}\n\nSabab: STIR yoki Guvohnoma raqami noto'g'ri / tasdiqlanmadi.\n\nTo'g'ri hujjatlar bilan qaytadan ro'yxatdan o'ting 👇", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏪 Qaytadan ro'yxatdan o'tish", callback_data="register_rest")]]))
     except: pass
 
+
+# --- SUPER ADMINGA FAQAT: Restoranlar qarzi hisoboti - hech kim ko'rmaydi! ---
+async def admin_debt_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    if q.from_user.id != SUPER_ADMIN:
+        await q.answer("⛔ Faqat Super Admin ko'radi!", show_alert=True); return
+    # Har bir restoran bo'yicha yakunlangan buyurtmalarni sanaymiz
+    lines = []
+    total_orders = 0
+    total_debt = 0
+    for key, r in DB.get("restaurants", {}).items():
+        cnt = sum(1 for o in DB.get("orders", {}).values() if o.get("cafe") == key and o.get("status") == "done")
+        debt = cnt * COMMISSION_PER_ORDER
+        total_orders += cnt
+        total_debt += debt
+        if cnt > 0:
+            lines.append(f"🏪 {r.get('name','')} - {cnt} ta buyurtma × {COMMISSION_PER_ORDER:,} = {debt:,} so'm")
+    if not lines:
+        lines = ["Hozircha yakunlangan buyurtma yo'q."]
+    txt = "📊 *RESTORANLAR QARZI - FAQAT SENGA!*\n\n⚠️ Bu hisobotni hech kim ko'rmaydi - faqat Super Admin.\n\n" + "\n".join(lines) + f"\n\n━━━━━━━━━━━━\n📦 Jami yakunlangan: {total_orders} ta\n💰 Jami qariz (sen olasan): {total_debt:,} so'm\n\n💡 Har bir buyurtmadan restoran senga {COMMISSION_PER_ORDER:,} so'm to'laydi.\nOy oxirida har bir restoranga ayt: 'Bu oy N ta buyurtma bo'ldi, N × {COMMISSION_PER_ORDER:,} = ... so'm'.\n\n❌ Mijozdan olinmaydi, kurerdan olinmaydi - faqat RESTORANDAN."
+    await send_new_window(update, context, txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Admin panel", callback_data="admin_panel")]]))
+
 async def admin_money_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     if q.from_user.id != SUPER_ADMIN:
@@ -1836,6 +1861,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(admin_stats, pattern="^admin_stats$"))
     app.add_handler(CallbackQueryHandler(admin_panel, pattern="^admin_panel$"))
     app.add_handler(CallbackQueryHandler(admin_money_info, pattern="^admin_money_info$"))
+    app.add_handler(CallbackQueryHandler(admin_debt_report, pattern="^admin_debt_report$"))
     app.add_handler(CallbackQueryHandler(admin_rest_approve, pattern="^admin_rest_approve_"))
     app.add_handler(CallbackQueryHandler(admin_rest_reject, pattern="^admin_rest_reject_"))
     app.add_handler(CallbackQueryHandler(admin_rest_payouts, pattern="^admin_rest_payouts$"))
