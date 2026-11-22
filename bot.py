@@ -542,13 +542,22 @@ async def courier_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     uid = str(q.from_user.id); u = DB["users"].get(uid, {})
     if not u.get("courier_registered"):
-        await q.edit_message_text("❌ Avval kuryer sifatida ro'yxatdan o'ting.",
+        await courier_new(q, context, "❌ Avval kuryer sifatida ro'yxatdan o'ting.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Ro'yxatdan o'tish", callback_data="register_courier")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+        return
+    # LOGIN/PAROL TEKSHIRUVI: eski kuryerlarda login yo'q bo'lsa - bir marta o'rnatadi, yangilarida parol so'raydi
+    if not u.get("courier_login"):
+        context.user_data["step"] = "courier_set_login"
+        await courier_new(q, context, "🔐 Xavfsizlik uchun login o'rnating!\n\nSiz eski ro'yxatdan o'tgansiz, loginingiz yo'q. Bir marta login o'ylab toping:\nMasalan: diyorbek01")
+        return
+    if not context.user_data.get("courier_logged_in"):
+        context.user_data["step"] = "courier_login"
+        await courier_new(q, context, f"🔐 Kirish kerak!\n\nLoginingiz: {u.get('courier_login')}\nLoginingizni qaytadan yozing (keyin parol so'rayman):")
         return
     my_taken = [o for o in DB["orders"].values() if o.get("courier_id")==q.from_user.id and o.get("status")=="taken"]
     my_done = [o for o in DB["orders"].values() if o.get("courier_id")==q.from_user.id and o.get("status")=="done"]
     status = "🟢 ONLINE" if u.get("online") else "🔴 OFFLINE"
-    txt = f"🚴 *Mening kuryer panelim*\n\nHolat: {status}\n🚗 Transport: {u.get('courier_transport','-')}\n📍 Hudud: {u.get('courier_area','-')}\n📞 Tel: {u.get('phone','-')}\n\n💰 Balans: {u.get('balance',0):,} so'm\n✅ Yetkazgan: {u.get('delivered',0)} ta ({len(my_done)} ta shu yerda)\n🚴 Hozir olib ketayotgan: {len(my_taken)} ta"
+    txt = f"🚴 *Mening kuryer panelim*\n🔐 Login: {u.get('courier_login','-')}\n\nHolat: {status}\n🚗 Transport: {u.get('courier_transport','-')}\n📍 Hudud: {u.get('courier_area','-')}\n📞 Tel: {u.get('phone','-')}\n\n💰 Balans: {u.get('balance',0):,} so'm\n✅ Yetkazgan: {u.get('delivered',0)} ta ({len(my_done)} ta shu yerda)\n🚴 Hozir olib ketayotgan: {len(my_taken)} ta"
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🟢 ONLINE / 🔴 OFFLINE", callback_data="courier_toggle")],
         [InlineKeyboardButton("📦 Bo'sh buyurtmalar", callback_data="courier_list")],
@@ -652,6 +661,74 @@ async def handle_courier_reg_text(update: Update, context: ContextTypes.DEFAULT_
         await courier_msg_new(update, context, f"✅ So'rovingiz yuborildi!\n💰 {bal:,} so'm\n💳 Karta: **** {card[-4:]}\n\nAdmin tez orada to'laydi, to'langach sizga xabar keladi.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Panelga qaytish", callback_data="courier_panel")]]))
         return True
+    # --- LOGIN / PAROL: ro'yxatdan o'tishda ---
+    if step == "regcourier_login":
+        login = text.lower().replace(" ", "").replace("@", "")
+        if len(login) < 4 or len(login) > 20 or not login.replace("_", "").replace(".", "").isalnum():
+            await courier_msg_new(update, context, "❌ Login noto'g'ri!\n\nFaqat lotin harf + raqam, 4-20 ta belgi. Masalan: diyorbek01\nQaytadan yozing:")
+            return True
+        # Boshqa kuryerda bormi?
+        for _uid2, _u2 in DB["users"].items():
+            if _uid2 != uid and _u2.get("courier_login") == login:
+                await courier_msg_new(update, context, f"❌ '{login}' logini band! Boshqa login tanlang:")
+                return True
+        rc = context.user_data.get("reg_courier", {}); rc["login"] = login; context.user_data["reg_courier"] = rc
+        context.user_data["step"] = "regcourier_password"
+        await courier_msg_new(update, context, f"✅ Login: {login}\n\n5-qadam: Parol o'ylab toping (kamida 4 ta belgi):\nMasalan: 1234 yoki diyor2024\n\n⚠️ Parolni hech kimga bermang! Yozgan xabaringiz o'chib ketadi.")
+        return True
+    if step == "regcourier_password":
+        if len(text) < 4:
+            await courier_msg_new(update, context, "❌ Parol kamida 4 ta belgi bo'lishi kerak. Qaytadan yozing:")
+            return True
+        rc = context.user_data.get("reg_courier", {}); rc["pass_hash"] = courier_pass_hash(text); context.user_data["reg_courier"] = rc
+        # Ro'yxatni yakunlaymiz - finish funksiyasi endi login/parol bilan saqlaydi
+        await finish_courier_reg_with_phone(update, context)
+        return True
+    # --- KIRISH (LOGIN): panel ochishda parol so'rash ---
+    if step == "courier_login":
+        login = text.lower().replace(" ", "").replace("@", "")
+        # Shu Telegram ID dagi kuryerning logini shu bo'lishi kerak
+        u_now = DB["users"].get(uid, {})
+        if u_now.get("courier_login") and u_now.get("courier_login") != login:
+            await courier_msg_new(update, context, "❌ Bu login sizniki emas! O'z loginingizni yozing:")
+            return True
+        context.user_data["login_try"] = login
+        context.user_data["step"] = "courier_login_pass"
+        await courier_msg_new(update, context, f"🔐 Login: {login}\n\nParolingizni yozing:")
+        return True
+    if step == "courier_login_pass":
+        u_now = DB["users"].get(uid, {})
+        if u_now.get("courier_pass_hash") and courier_pass_hash(text) == u_now.get("courier_pass_hash"):
+            context.user_data["courier_logged_in"] = True
+            context.user_data["step"] = None
+            await courier_msg_new(update, context, f"✅ Xush kelibsiz, {u_now.get('name','Kuryer')}! Kirish muvaffaqiyatli.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Kuryer panelim", callback_data="courier_panel")]]))
+        else:
+            await courier_msg_new(update, context, "❌ Parol xato! Qaytadan yozing:")
+        return True
+    # --- ESKI KURYERLARGA LOGIN/PAROL O'RNATISH (bir marta) ---
+    if step == "courier_set_login":
+        login = text.lower().replace(" ", "").replace("@", "")
+        if len(login) < 4:
+            await courier_msg_new(update, context, "❌ Login kamida 4 ta belgi bo'lsin. Qaytadan yozing:")
+            return True
+        context.user_data["set_login"] = login
+        context.user_data["step"] = "courier_set_pass"
+        await courier_msg_new(update, context, f"✅ Login: {login}\n\nEndi parol o'ylab toping (kamida 4 ta belgi):")
+        return True
+    if step == "courier_set_pass":
+        if len(text) < 4:
+            await courier_msg_new(update, context, "❌ Parol kamida 4 ta belgi bo'lishi kerak. Qaytadan yozing:")
+            return True
+        u_now = DB["users"].get(uid, {})
+        u_now["courier_login"] = context.user_data.get("set_login", "")
+        u_now["courier_pass_hash"] = courier_pass_hash(text)
+        save()
+        context.user_data["courier_logged_in"] = True
+        context.user_data["step"] = None
+        await courier_msg_new(update, context, f"✅ Login va parol o'rnatildi!\n🔐 Login: {u_now['courier_login']}\n\nEndi panel har safar shu parol bilan ochiladi.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Kuryer panelim", callback_data="courier_panel")]]))
+        return True
     return False
 
 async def finish_courier_reg_with_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -666,11 +743,22 @@ async def finish_courier_reg_with_phone(update: Update, context: ContextTypes.DE
     if "balance" not in DB["users"][uid]: DB["users"][uid]["balance"] = 0
     if "delivered" not in DB["users"][uid]: DB["users"][uid]["delivered"] = 0
     save()
+    # Agar login hali o'rnatilmagan bo'lsa - avval login/parol so'raymiz, tugatmaymiz
+    if not context.user_data.get("reg_courier", {}).get("login"):
+        context.user_data["step"] = "regcourier_login"
+        await courier_msg_new(update, context, f"✅ Telefon qabul qilindi!\n\n4-qadam: LOGIN o'ylab toping\nBu sizning kuryer loginingiz bo'ladi. Har safar panelga shu login + parol bilan kirasiz.\n\nMasalan: diyorbek01\nLoginingizni yozing:")
+        return True
+    # Login/parol ham tayyor - endi yakunlaymiz
+    _rc2 = context.user_data.get("reg_courier", {})
+    DB["users"][uid]["courier_login"] = _rc2.get("login", "")
+    DB["users"][uid]["courier_pass_hash"] = _rc2.get("pass_hash", "")
+    save()
     context.user_data["step"] = None
+    context.user_data["courier_logged_in"] = True
     context.user_data.pop("reg_courier", None)
-    await courier_msg_new(update, context, f"🎉 *Tabriklaymiz! Kuryer sifatida ro'yxatdan o'tdingiz!*\n\n🚗 Transport: {rc.get('transport')}\n📍 Hudud: {rc.get('area')}\n\nEndi ONLINE bo'ling - buyurtmalar sizga keladi. Har bir yetkazgan buyurtma uchun hisobingizga pul qo'shiladi.",
+    await courier_msg_new(update, context, f"🎉 *Tabriklaymiz! Kuryer sifatida ro'yxatdan o'tdingiz!*\n\n🔐 Loginingiz: {DB['users'][uid].get('courier_login')}\n⚠️ Parolingizni eslab qoling! Panel har safar shu parol bilan ochiladi.\n\n🚗 Transport: {rc.get('transport')}\n📍 Hudud: {rc.get('area')}\n\nEndi ONLINE bo'ling - buyurtmalar sizga keladi. Har bir yetkazgan buyurtma uchun hisobingizga pul qo'shiladi.",
         parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Kuryer panelim", callback_data="courier_panel")]]))
-    try: await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"🆕 Yangi kuryer ro'yxatdan o'tdi!\n🚴 {update.effective_user.first_name} | ID: {uid}\n🚗 {rc.get('transport')} | 📍 {rc.get('area')}\n📞 {DB['users'][uid].get('phone','')}")
+    try: await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"🆕 Yangi kuryer ro'yxatdan o'tdi!\n🚴 {update.effective_user.first_name} | ID: {uid}\n🔐 Login: {DB['users'][uid].get('courier_login','-')} (parol kuryerda)\n🚗 {rc.get('transport')} | 📍 {rc.get('area')}\n📞 {DB['users'][uid].get('phone','')}")
     except: pass
     return True
 
@@ -950,6 +1038,11 @@ async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("Bu buyurtma allaqachon olingan!", show_alert=True); return
         if str(q.from_user.id) not in DB["users"]:
             await q.answer("Avval botda /start bosib kuryer sifatida ro'yxatdan o'ting!", show_alert=True); return
+        if DB["users"][str(q.from_user.id)].get("courier_pass_hash") and not context.user_data.get("courier_logged_in"):
+            await q.answer("⛔ Avval botga kirib login + parol bilan kiring! Keyin buyurtma oling.", show_alert=True)
+            try: await context.bot.send_message(chat_id=q.from_user.id, text="⛔ Buyurtma olish uchun avval kiring:\n\nBotda /start bosing → Kuryer panelim → login + parolni yozing.")
+            except: pass
+            return
         order["status"] = "taken"; order["courier_id"] = q.from_user.id; order["courier_name"] = q.from_user.first_name; save()
         _u2 = DB["users"][str(q.from_user.id)]
         # 1) Kanaldagi postni "OLINDI" ga almashtiramiz - tugma yo'qoladi, boshqa kuryer bosolmaydi
@@ -972,6 +1065,13 @@ async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # TUZATILDI: foydalanuvchi DB da bo'lmasa - KeyError bilan yiqilmasin
     if str(q.from_user.id) not in DB["users"]:
         await q.answer("Avval botda /start bosib kuryer sifatida ro'yxatdan o'ting!", show_alert=True); return
+    # LOGIN/PAROL: paroli bor, lekin hali kirmagan kuryer buyurtma ololmaydi - birovning nomidan olib ketmasin
+    _u_take = DB["users"][str(q.from_user.id)]
+    if _u_take.get("courier_pass_hash") and not context.user_data.get("courier_logged_in"):
+        await q.answer("⛔ Avval botga kirib login + parol bilan kiring! Keyin buyurtma oling.", show_alert=True)
+        try: await context.bot.send_message(chat_id=q.from_user.id, text="⛔ Buyurtma olish uchun avval kiring:\n\nBotda /start bosing → Kuryer panelim → login + parolni yozing.")
+        except: pass
+        return
     order["status"] = "taken"; order["courier_id"] = q.from_user.id; order["courier_name"] = q.from_user.first_name; save()
     # Kanaldagi e'lonni "OLINDI" deb yangilaymiz - boshqa kuryerlar bosib qotib qolmasin
     _ch_mid = order.get("channel_msg_id")
@@ -1074,6 +1174,11 @@ async def generic_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
     elif q.data in ["rest_menu","rest_stats"]:
         await rest_menu_manage(update, context)
+
+
+import hashlib as _hashlib
+def courier_pass_hash(pw):
+    return _hashlib.sha256(str(pw).encode()).hexdigest()[:32]
 
 import asyncio
 async def on_location(update, context):
