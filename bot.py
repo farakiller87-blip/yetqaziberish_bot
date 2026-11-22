@@ -708,20 +708,38 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
 
 # --- RESTORAN ---
+async def _edit_q(q, text, reply_markup=None):
+    # Rasmli xabar bo'lsa edit_message_text ishlamaydi - caption ni o'zgartiramiz
+    try:
+        if reply_markup: await q.edit_message_text(text, reply_markup=reply_markup)
+        else: await q.edit_message_text(text)
+    except Exception:
+        try:
+            if reply_markup: await q.edit_message_caption(caption=text, reply_markup=reply_markup)
+            else: await q.edit_message_caption(caption=text)
+        except Exception:
+            try:
+                if reply_markup: await q.message.reply_text(text, reply_markup=reply_markup)
+                else: await q.message.reply_text(text)
+            except: pass
+
 async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     action, oid = q.data.split("_"); oid = str(oid)
     order = DB["orders"].get(oid)
     if not order: await q.answer("Topilmadi"); return
+    # Agar buyurtma allaqachon qabul qilingan bo'lsa - yana bir marta bosganda ham ishlasin
     if action == "reject":
         order["status"] = "rejected"; save()
-        await context.bot.send_message(chat_id=order["user_id"], text=f"❌ Buyurtma #{oid} rad etildi.")
+        try: await context.bot.send_message(chat_id=order["user_id"], text=f"❌ Buyurtma #{oid} rad etildi.")
+        except: pass
         rname = DB['restaurants'][order['cafe']]['name']
-        await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"❌ Buyurtma #{oid} RAD ETILDI\nRestoran: {rname}")
-        await q.edit_message_text("❌ Rad etildi"); return
+        try: await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"❌ Buyurtma #{oid} RAD ETILDI\nRestoran: {rname}")
+        except: pass
+        await _edit_q(q, "❌ Rad etildi"); return
     order["status"] = "to_courier"; save()
     r = DB["restaurants"][order["cafe"]]
-    await q.edit_message_text(f"✅ Buyurtma #{oid} qabul qilindi. Kuryerlarga yuborildi.")
+    await _edit_q(q, f"✅ Buyurtma #{oid} qabul qilindi. Kuryerlarga yuborildi.")
     await context.bot.send_message(chat_id=order["user_id"], text="✅ Buyurtmangiz tasdiqlandi! Kuryer qidirilmoqda...")
     # Kanalga + online kuryerlarga
     ctext = f"🚨 YANGI BUYURTMA #{oid}!\n\n🏪 {r['name']}\n📍 {order['address']}\n👤 {order['name']} | 📞 {order['phone']}\n💰 {order['total']} so'm\n\nKim birinchi olsa - oshaniki!"
@@ -764,7 +782,7 @@ async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("Bu buyurtma allaqachon olingan!"); return
     order["status"] = "taken"; order["courier_id"] = q.from_user.id; order["courier_name"] = q.from_user.first_name; save()
     u = DB["users"][str(q.from_user.id)]
-    await q.edit_message_text(f"✅ Buyurtma #{oid} seniki!\n\n📍 Manzil: {order['address']}\n📞 Mijoz: {order['phone']}\n💰 {order['total']} so'm\n\nYetkazib bo'lgach pastni bos:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ YETKAZDIM", callback_data=f"done_{oid}")]]))
+    await _edit_q(q, f"✅ Buyurtma #{oid} seniki!\n\n📍 Manzil: {order['address']}\n📞 Mijoz: {order['phone']}\n💰 {order['total']} so'm\n\nYetkazib bo'lgach pastni bos:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ YETKAZDIM", callback_data=f"done_{oid}")]]))
     await context.bot.send_message(chat_id=order["user_id"], text=f"🚴 Kuryer {u['name']} yo'lga chiqdi! Buyurtma #{oid} yo'lda.")
     # Restoranga ham xabar
     await context.bot.send_message(chat_id=DB["restaurants"][order["cafe"]]["admin"], text=f"🚴 Kuryer {u['name']} buyurtma #{oid} ni oldi.")
@@ -775,7 +793,7 @@ async def courier_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not order: return
     order["status"] = "done"; save()
     uid = str(q.from_user.id); DB["users"][uid]["delivered"] = DB["users"][uid].get("delivered", 0) + 1; DB["users"][uid]["balance"] = DB["users"][uid].get("balance", 0) + 15000; save()
-    await q.edit_message_text(f"✅ Buyurtma #{oid} yetkazildi! +15000 so'm hisobingga qo'shildi.")
+    await _edit_q(q, f"✅ Buyurtma #{oid} yetkazildi! +15000 so'm hisobingga qo'shildi.")
     await context.bot.send_message(chat_id=order["user_id"], text=f"✅ Buyurtmangiz #{oid} yetkazildi! Yoqimli ishtaha 😋\n\nKuryerni baholang:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⭐️⭐️⭐️⭐️⭐️", callback_data=f"rate_5_{oid}"), InlineKeyboardButton("⭐️⭐️⭐️", callback_data=f"rate_3_{oid}")]]))
     await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"✅ #{oid} yetkazildi. Kuryer: {DB['users'][uid]['name']}")
 
@@ -909,3 +927,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
