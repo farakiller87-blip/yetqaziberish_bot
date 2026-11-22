@@ -415,6 +415,7 @@ async def rest_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = f"🏪 *{r['name']}*\n\nHolat: {status}\n🚚 Yetkazish: {r.get('delivery',15000):,} so'm\n🍔 Taomlar: {len(r.get('menu',{}))} ta\n❌ Tugagan: {len(sold)} ta\n💰 Sizga to'lanadigan (Super Admindan): {_owed:,} so'm\n💳 Kartangiz: {r.get('payme_card','-')}\n\nNimani o'zgartirmoqchisiz?"
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Yangi taom qo'shish", callback_data="rest_add")],
+        [InlineKeyboardButton("📸 Taomga rasm qo'shish", callback_data="rest_photo_ask")],
         [InlineKeyboardButton("💰 Narxni o'zgartirish", callback_data="rest_price_list")],
         [InlineKeyboardButton("❌ Tugadi / Bor qilish", callback_data="rest_menu")],
         [InlineKeyboardButton("🚚 Yetkazish narxini o'zgartirish", callback_data="rest_delivery")],
@@ -474,6 +475,41 @@ async def rest_add_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["step"] = "rest_add"
     await q.edit_message_text("➕ *Yangi taom qo'shish*\n\nShunday yozing:\n`Osh - 35000`\nBir xabarda bir nechta ham bo'ladi:\n`Osh - 35000\\nShashlik - 45000`",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="rest_panel")]]), parse_mode="Markdown")
+
+
+async def rest_photo_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    key, r = _my_rest(q.from_user.id)
+    if not r:
+        await q.edit_message_text("Avval restoran ro'yxatdan o'tkazing."); return
+    _kb = []
+    for n in r.get("menu", {}).keys():
+        _has = "📸 " if n in r.get("menu_photos", {}) else "🍽️ "
+        _kb.append([InlineKeyboardButton(f"{_has}{_dish_emoji(n)} {n}", callback_data=f"rest_photo_{n}")])
+    _kb.append([InlineKeyboardButton("⬅️ Panel", callback_data="rest_panel")])
+    await q.edit_message_text("📸 *Qaysi taomga rasm qo'shamiz?*\n\nTaomni tanlang, keyin uning rasmini yuboring.\nMijozlar menyuda shu rasmni ko'radi.", reply_markup=InlineKeyboardMarkup(_kb), parse_mode="Markdown")
+
+async def rest_photo_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    _name = q.data.replace("rest_photo_", "", 1)
+    context.user_data["step"] = "rest_photo_val"
+    context.user_data["photo_dish"] = _name
+    await q.edit_message_text(f"📸 *{_dish_emoji(_name)} {_name}* uchun rasm yuboring 👇\n\nTelefoningizdan taomning chiroyli rasmini tanlab yuboring.\nRasm mijozlarga menyuda chiqadi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="rest_panel")]]), parse_mode="Markdown")
+
+# Rasm kelganda - on_photo handler
+async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Restoran taomiga rasm qo'shayapti
+    if context.user_data.get("step") == "rest_photo_val":
+        key, r = _my_rest(update.effective_user.id)
+        if not r:
+            await update.message.reply_text("Restoran topilmadi."); context.user_data["step"] = None; return
+        _dish = context.user_data.get("photo_dish", "")
+        _fid = update.message.photo[-1].file_id
+        r.setdefault("menu_photos", {})[_dish] = _fid; save()
+        context.user_data["step"] = None
+        await update.message.reply_text(f"✅ Rasm saqlandi!\n\n{_dish_emoji(_dish)} {_dish} - endi mijozlar menyuda rasmi bilan ko'radi 📸", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏪 Panelga qaytish", callback_data="rest_panel")]]))
+        return
+    await update.message.reply_text("📸 Rasm qabul qilindi! Agar taomga rasm qo'shmoqchi bo'lsangiz - Restoran panel → 📸 Taomga rasm qo'shish ni bosing.")
 
 async def rest_delivery_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -976,14 +1012,38 @@ def _cart_text(cart):
     total = sum(pr for _, pr in cart)
     return "🛒 *SAVATINGIZ:*\n" + "\n".join(lines) + f"\n\n📦 Jami taom: {len(cart)} ta\n💰 Jami summa: {total:,} so'm"
 
+def _dish_emoji(name: str) -> str:
+    n = name.lower()
+    if "osh" in n or "palov" in n: return "🍚"
+    if "shashlik" in n or "kabob" in n: return "🍢"
+    if "lavash" in n: return "🌯"
+    if "burger" in n: return "🍔"
+    if "pizza" in n or "pitsa" in n: return "🍕"
+    if "somsa" in n: return "🥟"
+    if "sho'rva" in n or "shorva" in n or "soup" in n: return "🍲"
+    if "salat" in n or "salad" in n: return "🥗"
+    if "manti" in n: return "🥟"
+    if "lag'mon" in n or "lagmon" in n or "noodle" in n: return "🍜"
+    if "choy" in n or "kofe" in n or "coffee" in n or "latte" in n or "kapuchino" in n: return "☕"
+    if "cola" in n or "sharbat" in n or "ichimlik" in n or "suv" in n: return "🥤"
+    if "fries" in n or "kartoshka" in n: return "🍟"
+    if "hot-dog" in n or "hotdog" in n: return "🌭"
+    if "desert" in n or "shirin" in n or "tort" in n or "kruassan" in n: return "🍰"
+    if "tovuq" in n or "chicken" in n: return "🍗"
+    if "baliq" in n or "fish" in n: return "🐟"
+    if "non" in n: return "🍞"
+    return "🍽️"
+
 def _menu_kb(r, cart):
     _sold = set(r.get("sold_out", []))
     kb = []
     for n, pr in r["menu"].items():
+        _pr = pr.get("price", pr) if isinstance(pr, dict) else pr
+        _em = _dish_emoji(n)
         if n in _sold:
-            kb.append([InlineKeyboardButton(f"❌ {n} - Tugadi", callback_data="sold_out_noop")])
+            kb.append([InlineKeyboardButton(f"❌ {_em} {n} - Tugadi", callback_data="sold_out_noop")])
         else:
-            kb.append([InlineKeyboardButton(f"{n} - {pr:,} so'm", callback_data=f"add_{n}_{pr}")])
+            kb.append([InlineKeyboardButton(f"{_em} {n} - {_pr:,} so'm", callback_data=f"add_{n}_{_pr}")])
     total = sum(pr for _, pr in cart)
     if cart:
         kb.append([InlineKeyboardButton(f"🛒 Savatni ko'rish ({len(cart)} ta - {total:,} so'm)", callback_data="cart_view")])
@@ -1068,6 +1128,13 @@ async def cafe_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if cart:
         text += f"\n\n{_cart_text(cart)}"
     await send_new_window(update, context, text, reply_markup=_menu_kb(r, cart))
+    # RASMLI TAOMLAR: rasmi bor taomlarni alohida rasmli karta qilib yuboramiz - zamonaviy ko'rinish!
+    _photos = r.get("menu_photos", {})
+    for _n, _pr in r.get("menu", {}).items():
+        if _n in _photos and _n not in set(r.get("sold_out", [])):
+            _price = _pr.get("price", _pr) if isinstance(_pr, dict) else _pr
+            try: await context.bot.send_photo(chat_id=q.from_user.id, photo=_photos[_n], caption=f"{_dish_emoji(_n)} *{_n}*\n💰 {_price:,} so'm\n🏪 {r['name']}", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(f"➕ Savatga qo'shish - {_price:,} so'm", callback_data=f"add_{_n}_{_price}")]]))
+            except: pass
 
 async def add_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -1853,6 +1920,9 @@ async def main():
     app.add_handler(CallbackQueryHandler(rest_price_ask, pattern="^rest_price_"))
     app.add_handler(CallbackQueryHandler(rest_toggle_item, pattern="^rest_toggle_"))
     app.add_handler(CallbackQueryHandler(rest_add_ask, pattern="^rest_add$"))
+    app.add_handler(CallbackQueryHandler(rest_photo_ask, pattern="^rest_photo_ask$"))
+    app.add_handler(CallbackQueryHandler(rest_photo_pick, pattern="^rest_photo_"))
+    app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     app.add_handler(CallbackQueryHandler(rest_delivery_ask, pattern="^rest_delivery$"))
     app.add_handler(CallbackQueryHandler(rest_open_toggle, pattern="^rest_open$"))
     app.add_handler(CallbackQueryHandler(rest_stats_new, pattern="^rest_stats_new$"))
