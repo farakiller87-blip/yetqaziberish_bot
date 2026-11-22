@@ -519,11 +519,41 @@ async def courier_withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     uid = str(q.from_user.id); u = DB["users"].get(uid, {})
     bal = u.get("balance", 0)
-    if bal < 30000:
-        await q.answer("Kamida 30 000 so'm bo'lganda yechish mumkin", show_alert=True); return
+    # TUZATILDI: oldin 30 000 edi, endi 1 ta yetkazish (15 000) dan ham yechish mumkin
+    # Agar balans 0 bo'lsa - aniq yozuv bilan tushuntiramiz, faqat alert emas
+    if bal <= 0:
+        await _edit_q(q, f"💰 Balansingiz: 0 so'm\n\nHali pul yechib bo'lmaydi - avval buyurtma yetkazib pul ishlang.\nHar bir yetkazish uchun +15 000 so'm qo'shiladi.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📦 Bo'sh buyurtmalar", callback_data="courier_list")],[InlineKeyboardButton("⬅️ Panel", callback_data="courier_panel")]]))
+        return
     context.user_data["step"] = "courier_withdraw_card"
-    await q.edit_message_text(f"💰 Balansingiz: {bal:,} so'm\n\nPulni qaysi kartaga o'tkazaylik? Karta raqamini yozing (16 ta raqam):\nMasalan: 8600 1234 5678 9012",
+    context.user_data["withdraw_amount"] = bal
+    await _edit_q(q, f"💰 Balansingiz: {bal:,} so'm\n\nPulni qaysi kartaga o'tkazaylik? Karta raqamini yozing (16 ta raqam):\nMasalan: 8600 1234 5678 9012\n\nSo'rov yuboriladi, admin to'lab beradi.",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="courier_panel")]]))
+
+async def courier_withdraw_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Faqat Super Admin bosadi - balansni nollaydi, kuryerga xabar yuboradi
+    q = update.callback_query; await q.answer()
+    if q.from_user.id != SUPER_ADMIN:
+        await q.answer("Faqat admin tasdiqlay oladi", show_alert=True); return
+    try: _, uid, amount = q.data.split("_"); amount = int(amount)
+    except: return
+    u = DB["users"].get(str(uid))
+    if not u: await q.answer("Kuryer topilmadi"); return
+    # Balansni nollaymiz
+    u["balance"] = 0; save()
+    await _edit_q(q, f"✅ To'landi!\n🚴 Kuryer: {u.get('name')} | ID: {uid}\n💰 {amount:,} so'm - balans nolga tushdi.")
+    try: await context.bot.send_message(chat_id=int(uid), text=f"✅ Pul yechish tasdiqlandi!\n\n💰 {amount:,} so'm kartangizga o'tkazildi.\nBalansingiz endi 0 so'm. Ishlashda davom eting! 🚴")
+    except: pass
+
+async def courier_withdraw_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    if q.from_user.id != SUPER_ADMIN:
+        await q.answer("Faqat admin", show_alert=True); return
+    try: _, uid, amount = q.data.split("_")
+    except: return
+    await _edit_q(q, f"❌ So'rov rad etildi. Kuryer ID: {uid}, summa: {amount}")
+    try: await context.bot.send_message(chat_id=int(uid), text="❌ Pul yechish so'rovingiz rad etildi. Admin bilan bog'laning.")
+    except: pass
 
 async def courier_edit_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -559,7 +589,7 @@ async def handle_courier_reg_text(update: Update, context: ContextTypes.DEFAULT_
         u = DB["users"][uid]; bal = u.get("balance", 0)
         # So'rovni Super Adminga yuboramiz, balansni nolga tushirmaymiz - admin tasdiqlagach to'lanadi
         try: await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"💸 *PUL YECHISH SO'ROVI*\n\n🚴 Kuryer: {u.get('name')} | ID: {uid}\n📞 {u.get('phone')}\n💰 Summa: {bal:,} so'm\n💳 Karta: {card[:4]} **** **** {card[-4:]}\n\nTo'laganingizdan keyin kuryer balansini qo'lda nollang.",
-                parse_mode="Markdown")
+                parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ TO'LADIM - Tasdiqlash", callback_data=f"wdok_{uid}_{bal}"), InlineKeyboardButton("❌ Rad etish", callback_data=f"wdno_{uid}_{bal}")]]))
         except: pass
         context.user_data["step"] = None
         await update.message.reply_text(f"✅ So'rovingiz yuborildi!\n💰 {bal:,} so'm\n💳 Karta: **** {card[-4:]}\n\nAdmin tez orada to'laydi, to'langach sizga xabar keladi.",
@@ -938,6 +968,8 @@ async def main():
     app.add_handler(CallbackQueryHandler(courier_panel, pattern="^courier_panel$"))
     app.add_handler(CallbackQueryHandler(courier_balance_new, pattern="^courier_balance_new$"))
     app.add_handler(CallbackQueryHandler(courier_withdraw, pattern="^courier_withdraw$"))
+    app.add_handler(CallbackQueryHandler(courier_withdraw_approve, pattern="^wdok_"))
+    app.add_handler(CallbackQueryHandler(courier_withdraw_reject, pattern="^wdno_"))
     app.add_handler(CallbackQueryHandler(courier_edit_ask, pattern="^courier_edit$"))
     app.add_handler(CallbackQueryHandler(courier_list, pattern="^courier_list$"))
     app.add_handler(CallbackQueryHandler(courier_take, pattern="^take_"))
