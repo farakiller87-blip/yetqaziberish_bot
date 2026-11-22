@@ -95,7 +95,7 @@ def main_kb(role, locked_role=None):
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("📦 Barcha buyurtmalar", callback_data="admin_orders")],
             [InlineKeyboardButton("🏪 Restoranlar", callback_data="admin_rests")],
-        [InlineKeyboardButton("💸 Restoranlarga to'lov", callback_data="admin_rest_payouts")],
+        [InlineKeyboardButton("ℹ️ Pul tartibi: Super Admin pulga aralashmaydi", callback_data="admin_money_info")],
             [InlineKeyboardButton("🚴 Kuryerlar", callback_data="admin_couriers")],
             [InlineKeyboardButton("👥 Mijozlar", callback_data="admin_users")],
             [InlineKeyboardButton("📊 Statistika", callback_data="admin_stats")],
@@ -643,6 +643,10 @@ async def courier_withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await courier_new(q, context, f"💰 Balansingiz: 0 so'm\n\nHali pul yechib bo'lmaydi - avval buyurtma yetkazib pul ishlang.\nHar bir yetkazish uchun +15 000 so'm qo'shiladi.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📦 Bo'sh buyurtmalar", callback_data="courier_list")],[InlineKeyboardButton("⬅️ Panel", callback_data="courier_panel")]]))
         return
+    # YANGI QOIDA: Super Admin kurerga pul bermaydi! Kuryer pulni restorandan oladi.
+    await courier_new(q, context, f"⚠️ Super Admin pul bermaydi!\n\n🚴 Kurer xizmat haqini har doim RESTORAN ADMINI beradi.\n\n💳 Karta bo'lsa - pul restoran kartasida, adminidan so'rab ol.\n💵 Naqd bo'lsa - mijoz bergan naqddan xizmat haqingni o'zing olib qol.\n\nRestoran adminiga boring va xizmat haqingizni so'rang!",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Panelga qaytish", callback_data="courier_panel")]]))
+    return
     context.user_data["step"] = "courier_withdraw_card"
     context.user_data["withdraw_amount"] = bal
     await courier_new(q, context, f"💰 Balansingiz: {bal:,} so'm\n\nPulni qaysi kartaga o'tkazaylik? Karta raqamini yozing (16 ta raqam):\nMasalan: 8600 1234 5678 9012\n\nSo'rov yuboriladi, admin to'lab beradi.",
@@ -1158,7 +1162,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # PUL TAQSIMOTI: Naqd (hisobdan) bo'lsa - pul Super Admin kartasida turadi, restoranga keyin o'tkazamiz.
     # Payme/Click bo'lsa - mijoz to'g'ridan-to'g'ri restoran kartasiga to'laydi, Super Adminga qarz yo'q.
     # Naqd (kurerdan) - hisobdan yechilmaydi, Super Adminga qarz ham yozilmaydi - naqdni kurer olib boradi
-    _rest_owed = _sub if payment == "Naqd 💵" else 0
+    # YANGI QOIDA: Super Admin pulga aralashmaydi - hech kim Super Adminga qarz yozmaydi. Hamma pul RESTORANGA boradi.
+    _rest_owed = 0
     DB["orders"][str(oid)] = {"id": oid, "cafe": cafe_key, "cart": cart, "total": total, "food_total": _sub, "delivery_fee": _del, "payment": payment, "user_id": int(uid), "name": DB["users"][uid]["name"], "phone": DB["users"][uid].get("phone",""), "address": address, "status": "waiting", "courier_id": None, "created": "now", "rest_owed": _rest_owed, "rest_paid": False}
     save()
     context.user_data["step"] = None
@@ -1180,6 +1185,10 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if payment == "Naqd (kurerdan) 💵":
         try: await context.bot.send_message(chat_id=r["admin"], text=f"🚴💵 DIQQAT! Buyurtma #{oid} - NAQD TO'LOV!\n\nMijoz pulni KURERDAN berib yuboradi.\n💰 Summa: {total:,} so'm\nKurer mijozdan naqd pulni olib, sizga olib keladi. Kurer kelganda pulni sanab oling!")
         except: pass
+    # Karta bo'lsa - restoran adminiga: kurer haqini SEN berasan!
+    if payment in ("Payme 💳", "Click 💳"):
+        try: await context.bot.send_message(chat_id=r["admin"], text=f"💳 DIQQAT! Buyurtma #{oid} - KARTA BILAN TO'LOV!\n\nMijoz kartasidan to'ladi - pul SIZNING kartangizga tushadi.\n💰 Jami: {total:,} so'm (taom: {_sub:,} + kurer: {_del:,} so'm)\n\n🚴 KURER XIZMAT HAQI: Mijoz kurer pulini ham kartasidan to'ladi!\n👉 Siz kurerga {_del:,} so'm xizmat haqini BERIB YUBORING!\nKurer taomni olganda yoki topshirganda - shu pulni unga bering (naqd yoki kartaga).")
+        except: pass
     await context.bot.send_message(chat_id=SUPER_ADMIN, text=text)
     # --- TO'LOV TASDIQI: Naqd bo'lmasa chek so'raymiz ---
     if payment in ("Payme 💳", "Click 💳"):
@@ -1194,9 +1203,9 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
     else:
         if payment == "Naqd (kurerdan) 💵":
-            _m2 = await context.bot.send_message(chat_id=update.effective_chat.id, text=f"✅ Buyurtmangiz yuborildi! Restoran tasdiqlashi kutilmoqda...\n\n🚴 To'lov: NAQD - kurerdan berib yuborasiz\n💵 Tayyorlab qo'ying: {total:,} so'm\nKurer kelganda naqd pulni kurerga bering, kurer restoranga olib boradi.\n💳 Hisobingizdan pul yechildi: YO'Q", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
+            _m2 = await context.bot.send_message(chat_id=update.effective_chat.id, text=f"✅ Buyurtmangiz yuborildi! Restoran tasdiqlashi kutilmoqda...\n\n🚴 To'lov: NAQD - kurerdan berib yuborasiz\n💵 Tayyorlab qo'ying: {total:,} so'm\nKurer kelganda naqd pulni kurerga bering, kurer restoranga olib boradi.\n⚠️ Pul Super Adminga emas - RESTORANGA boradi!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
         else:
-            _m2 = await context.bot.send_message(chat_id=update.effective_chat.id, text=f"✅ Buyurtmangiz yuborildi! Restoran tasdiqlashi kutilmoqda...\n\n💳 Hisobingizdan {total:,} so'm yechildi.\n💰 Qolgan balans: {DB['users'].get(str(update.effective_user.id), {}).get('client_balance', 0):,} so'm", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
+            _m2 = await context.bot.send_message(chat_id=update.effective_chat.id, text=f"✅ Buyurtmangiz yuborildi! Restoran tasdiqlashi kutilmoqda...\n\n💳 To'lov: {payment} - to'g'ridan-to'g'ri RESTORAN kartasiga\n💰 Summa: {total:,} so'm\n⚠️ Pul Super Adminga emas - RESTORANGA boradi!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
 
 
 # --- CHEK RASMINI QABUL QILISH ---
@@ -1365,7 +1374,14 @@ async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try: await context.bot.edit_message_text(chat_id=q.message.chat.id, message_id=q.message.message_id, text=f"✅ BUYURTMA #{oid} OLINDI!\n\n🚴 Kuryer: {q.from_user.first_name}\n🏪 {DB['restaurants'][order['cafe']]['name']}\n💰 {order['total']} so'm")
         except: pass
         # 2) Kuryerga SHAXSIY chatga tafsilot + YETKAZDIM tugmasini yuboramiz - keyingi ish shu yerda davom etadi
-        _cash = "\n\n🚴💵 NAQD TO'LOV! Mijoz pulni senga beradi - pulni mijozdan olib, restoranga berib yubor!\n💵 Olinadigan summa: " + f"{order['total']:,} so'm" if order.get("payment") == "Naqd (kurerdan) 💵" else ""
+        if order.get("payment") == "Naqd (kurerdan) 💵":
+            _cash = "\n\n🚴💵 NAQD TO'LOV! Mijoz pulni senga beradi - pulni mijozdan olib, restoranga berib yubor!\n💵 Olinadigan summa: " + f"{order['total']:,} so'm"
+        elif order.get("payment") in ("Payme 💳", "Click 💳"):
+            _cash = f"\n\n💳 KARTA BILAN TO'LOV! Mijozdan PUL OLMA!\n💰 Mijoz kurer xizmat haqini ({order.get('delivery_fee',15000):,} so'm) kartasidan to'ladi - pul restoran kartasida!\n🏪 Xizmat haqingni RESTORAN ADMINIDAN olasan!"
+        elif order.get("payment") == "Naqd 💵":
+            _cash = "\n\n💵 Hisobdan to'lov - mijozdan PUL OLMA! Pul hisobdan yechilgan."
+        else:
+            _cash = ""
         try: await context.bot.send_message(chat_id=q.from_user.id, text=f"✅ Buyurtma #{oid} seniki! (kanaldan olding)\n\n📍 Manzil: {order['address']}\n📞 Mijoz: {order['phone']}\n💰 {order['total']} so'm{_cash}\n\nYetkazib bo'lgach pastni bos:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ YETKAZDIM", callback_data=f"done_{oid}")]]))
         except: pass
         # 3) Mijoz + restoranga xabar
@@ -1403,7 +1419,14 @@ async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try: await context.bot.edit_message_text(chat_id=COURIER_CHANNEL, message_id=_ch_mid, text=f"✅ BUYURTMA #{oid} OLINDI!\n\n🚴 Kuryer: {q.from_user.first_name}\n\nYangi buyurtma kelsa shu yerda chiqadi.")
         except: pass
     u = DB["users"][str(q.from_user.id)]
-    _cash2 = f"\n\n🚴💵 NAQD TO'LOV! Mijoz pulni senga beradi - pulni mijozdan olib, restoranga berib yubor!\n💵 Olinadigan summa: {order['total']:,} so'm" if order.get("payment") == "Naqd (kurerdan) 💵" else ""
+    if order.get("payment") == "Naqd (kurerdan) 💵":
+        _cash2 = f"\n\n🚴💵 NAQD TO'LOV! Mijoz pulni senga beradi - pulni mijozdan olib, restoranga berib yubor!\n💵 Olinadigan summa: {order['total']:,} so'm"
+    elif order.get("payment") in ("Payme 💳", "Click 💳"):
+        _cash2 = f"\n\n💳 KARTA BILAN TO'LOV! Mijoz kartadan to'laydi - mijozdan PUL OLMA!\n💰 Mijoz kurer xizmat haqini ({order.get('delivery_fee',15000):,} so'm) kartasidan to'ladi - pul restoran kartasida!\n🏪 Sening xizmat haqingni RESTORAN ADMINI beradi - taomni olganda / topshirganda adminidan so'rab ol!"
+    elif order.get("payment") == "Naqd 💵":
+        _cash2 = f"\n\n💵 Hisobdan to'lov - mijozdan PUL OLMA! Pul allaqachon hisobdan yechilgan.\n💰 Sening puling ({order.get('delivery_fee',15000):,} so'm) balansingga qo'shiladi."
+    else:
+        _cash2 = ""
     await courier_new(q, context, f"✅ Buyurtma #{oid} seniki!\n\n📍 Manzil: {order['address']}\n📞 Mijoz: {order['phone']}\n💰 {order['total']} so'm{_cash2}\n\nYetkazib bo'lgach pastni bos:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ YETKAZDIM", callback_data=f"done_{oid}")]]))
     await context.bot.send_message(chat_id=order["user_id"], text=f"🚴 Kuryer {u['name']} yo'lga chiqdi! Buyurtma #{oid} yo'lda.")
     # Restoranga ham xabar - kurerdan naqd bo'lsa alohida eslatma bilan
@@ -1432,11 +1455,24 @@ async def courier_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save()
     uid = str(q.from_user.id)
     if uid not in DB["users"]: DB["users"][uid] = {"name": q.from_user.first_name, "role": "courier", "balance": 0, "delivered": 0}
-    DB["users"][uid]["delivered"] = DB["users"][uid].get("delivered", 0) + 1; DB["users"][uid]["balance"] = DB["users"][uid].get("balance", 0) + _fee; save()
+    DB["users"][uid]["delivered"] = DB["users"][uid].get("delivered", 0) + 1
+    # YANGI QOIDA: Super Admin kurerga pul bermaydi! Kurer pulini har doim RESTORAN beradi.
+    # Shuning uchun BOT BALANSIGA hech qachon pul qo'shmaymiz - kuryer pulni restorandan oladi.
+    # (Eski balanslar saqlanib turadi, yangi buyurtmada qo'shilmaydi)
+    if False:
+        DB["users"][uid]["balance"] = DB["users"][uid].get("balance", 0) + _fee
+    save()
     # TUZATILDI: Yetkazdim dan keyin PANEL QAYTADI - oldin faqat matn kelardi, kuryer yana /start bosishga majbur bo'lardi
     _u_done = DB["users"].get(uid, {})
     _status_done = "🟢 ONLINE" if _u_done.get("online") else "🔴 OFFLINE"
-    await courier_new(q, context, f"✅ Buyurtma #{oid} yetkazildi! +15000 so'm hisobingga qo'shildi.\n\n💰 Balans: {_u_done.get('balance',0):,} so'm\n✅ Yetkazgan: {_u_done.get('delivered',0)} ta\nHolat: {_status_done}",
+    _pay_kind = order.get("payment", "")
+    if _pay_kind in ("Payme 💳", "Click 💳"):
+        _courier_pay_msg = f"✅ Buyurtma #{oid} yetkazildi!\n\n💳 Mijoz karta bilan to'ladi - mijozdan pul olmading, to'g'ri qilding!\n💰 Mijoz kurer xizmat haqini ({_fee:,} so'm) kartasidan to'ladi - pul restoran kartasida!\n🏪 Sening {_fee:,} so'm xizmat haqingni RESTORAN ADMINI beradi - adminidan so'rab ol (naqd yoki kartaga)!\n⚠️ Super Admin pul bermaydi - pul restoranda!\n\n✅ Yetkazgan: {_u_done.get('delivered',0)} ta\nHolat: {_status_done}"
+    elif _pay_kind == "Naqd (kurerdan) 💵":
+        _courier_pay_msg = f"✅ Buyurtma #{oid} yetkazildi!\n\n🚴💵 Naqd pulni mijozdan olib restoranga berdingmi? Tekshir!\n💰 {total if 'total' in locals() else order.get('total',0):,} so'm naqddan {_fee:,} so'm - SENING xizmat haqing, qolganini restoranga ber!\n🏪 Xizmat haqingni restorandan emas - mijoz bergan naqddan o'zing olasan!\n⚠️ Super Admin pul bermaydi!\n✅ Yetkazgan: {_u_done.get('delivered',0)} ta\nHolat: {_status_done}"
+    else:
+        _courier_pay_msg = f"✅ Buyurtma #{oid} yetkazildi!\n\n🏪 Xizmat haqing ({_fee:,} so'm) ni RESTORAN ADMINIDAN ol!\n⚠️ Super Admin pul bermaydi - pul restoranda!\n✅ Yetkazgan: {_u_done.get('delivered',0)} ta\nHolat: {_status_done}"
+    await courier_new(q, context, _courier_pay_msg,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🚴 Mening kuryer panelim", callback_data="courier_panel")],
             [InlineKeyboardButton("📦 Bo'sh buyurtmalar", callback_data="courier_list")],
@@ -1445,6 +1481,10 @@ async def courier_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]), parse_mode=None)
     await context.bot.send_message(chat_id=order["user_id"], text=f"✅ Buyurtmangiz #{oid} yetkazildi! Yoqimli ishtaha 😋\n\nKuryerni baholang:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⭐️⭐️⭐️⭐️⭐️", callback_data=f"rate_5_{oid}"), InlineKeyboardButton("⭐️⭐️⭐️", callback_data=f"rate_3_{oid}")]]))
     await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"✅ #{oid} yetkazildi. Kuryer: {DB['users'][uid]['name']}")
+    # Karta bo'lsa - restoran adminiga: kurerga xizmat haqini ber!
+    if order.get("payment") in ("Payme 💳", "Click 💳"):
+        try: await context.bot.send_message(chat_id=DB["restaurants"][order["cafe"]]["admin"], text=f"💳 Buyurtma #{oid} yetkazildi!\n\nMijoz kartasidan to'ladi - pul sizning kartangizga tushdi.\n🚴 KURER XIZMAT HAQI: Mijoz kurer pulini ham kartasidan to'ladi!\n👉 Endi kurerga {order.get('delivery_fee',15000):,} so'm xizmat haqini BERIB YUBORING!\nKurer hozir sizdan shu pulni so'raydi - naqd yoki kartaga o'tkazing.")
+        except: pass
     # Kurerdan naqd bo'lsa - yetkazilgandan keyin ham eslatma: naqd pul restoranga borishi kerak
     if order.get("payment") == "Naqd (kurerdan) 💵":
         try: await context.bot.send_message(chat_id=q.from_user.id, text=f"🚴💵 ESLATMA! Buyurtma #{oid} - NAQD edi.\n\n💵 {order['total']:,} so'm ni mijozdan oldingmi?\nEndi shu pulni restoranga berib yubor! Restoran admini pulni sanab oladi.")
@@ -1553,6 +1593,14 @@ async def admin_rest_pay_ok(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💸 Boshqa restoranga to'lov", callback_data="admin_rest_payouts")], [InlineKeyboardButton("⬅️ Admin panel", callback_data="admin_panel")]]))
     try: await context.bot.send_message(chat_id=r.get("admin"), text=f"✅ *PUL O'TKAZILDI!*\n\n🏪 {r.get('name')}\n💰 {owed:,} so'm\n💳 Kartangiz: {r.get('payme_card','-')}\n\nSuper Admin Naqd (hisobdan) buyurtmalarning taom pulini kartangizga o'tkazdi. Kartangizni tekshiring! 💳")
     except: pass
+
+
+async def admin_money_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    if q.from_user.id != SUPER_ADMIN:
+        await q.answer("Faqat Super Admin", show_alert=True); return
+    await send_new_window(update, context, "ℹ️ *PUL TARTIBI - SUPER ADMIN PULGA ARALASHMAYDI!*\n\n✅ MIJOZ → RESTORAN: Mijoz pulni to'g'ridan-to'g'ri restoranga to'laydi (Click/Payme - restoran kartasiga, Naqd - kurer orqali restoranga).\n\n✅ RESTORAN → KURYER: Kurer xizmat haqini RESTORAN ADMINI beradi (karta bo'lsa - restoran kartasidan, naqd bo'lsa - mijoz bergan naqddan).\n\n❌ Super Admin mijozdan pul OLMAYDI.\n❌ Super Admin kurerga pul BERMAYDI.\n\nSuper Admin faqat BOT XIZMATI beradi - pul aylanmaydi.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Admin panel", callback_data="admin_panel")]]))
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != SUPER_ADMIN:
@@ -1705,6 +1753,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(on_rate, pattern="^rate_"))
     app.add_handler(CallbackQueryHandler(admin_stats, pattern="^admin_stats$"))
     app.add_handler(CallbackQueryHandler(admin_panel, pattern="^admin_panel$"))
+    app.add_handler(CallbackQueryHandler(admin_money_info, pattern="^admin_money_info$"))
     app.add_handler(CallbackQueryHandler(admin_rest_payouts, pattern="^admin_rest_payouts$"))
     app.add_handler(CallbackQueryHandler(admin_rest_pay_ask, pattern="^restpay_"))
     app.add_handler(CallbackQueryHandler(admin_rest_pay_ok, pattern="^restpayok_"))
