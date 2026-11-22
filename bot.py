@@ -270,9 +270,9 @@ async def register_rest(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_new_window(update, context, f"✅ Sizda allaqachon restoran bor: {names}",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏪 Restoran panelim", callback_data="rest_panel")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
         return
-    context.user_data["step"] = "reg_name"
+    context.user_data["step"] = "reg_stir"
     context.user_data["reg"] = {}
-    await q.edit_message_text("🏪 *Restoran ro'yxatdan o'tish*\n\n1-qadam: Restoraningiz nomini yozing:\nMasalan: Diplomat Restaurant",
+    await q.edit_message_text("🏪 *Restoran ro'yxatdan o'tish - TASDIQLASH KERAK!*\n\n⚠️ Hamma ham restoran admini bo'la olmaydi!\nFaqat GUVOXNOMASI bor tadbirkor restoran bo'la oladi.\n\n1-qadam: *STIR raqamingizni* yozing:\nSTIR - 9 ta raqamdan iborat (masalan: 123456789)\n\nSTIR ni yozing 👇",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="back_main")]]), parse_mode="Markdown")
 
 async def register_rest_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -294,6 +294,26 @@ async def handle_reg_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return False
     text = (update.message.text or "").strip()
     reg = context.user_data.get("reg", {})
+    if step == "reg_stir":
+        # STIR - 9 ta raqam bo'lishi shart!
+        _stir = text.replace(" ", "").replace("-", "")
+        if not _stir.isdigit() or len(_stir) != 9:
+            await update.message.reply_text("❌ STIR noto'g'ri!\n\nSTIR - 9 ta raqam bo'lishi kerak.\nMasalan: 123456789\n\nQaytadan yozing - faqat 9 ta raqam:")
+            return True
+        reg["stir"] = _stir
+        context.user_data["reg"] = reg
+        context.user_data["step"] = "reg_guvohnoma"
+        await update.message.reply_text(f"✅ STIR qabul qilindi: {_stir}\n\n2-qadam: *GUVOXNOMA raqamini* yozing:\nGuvohnoma - tadbirkorlik guvohnomangiz raqami (masalan: 123456 yoki AB-123456)\n\nGuvohnoma bo'lmasa - restoran bo'la olmaysiz!\nGuvohnoma raqamini yozing 👇", parse_mode="Markdown")
+        return True
+    if step == "reg_guvohnoma":
+        if len(text) < 4:
+            await update.message.reply_text("❌ Guvohnoma raqami juda qisqa!\nGuvohnomangiz raqamini to'liq yozing (kamida 4 ta belgi):")
+            return True
+        reg["guvohnoma"] = text
+        context.user_data["reg"] = reg
+        context.user_data["step"] = "reg_name"
+        await update.message.reply_text(f"✅ Guvohnoma qabul qilindi: {text}\n\n3-qadam: Restoraningiz nomini yozing:\nMasalan: Diplomat Restaurant")
+        return True
     if step == "reg_name":
         if len(text) < 3:
             await update.message.reply_text("❌ Nom juda qisqa. Qaytadan yozing:")
@@ -301,7 +321,7 @@ async def handle_reg_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reg["name"] = text
         context.user_data["reg"] = reg
         context.user_data["step"] = "reg_menu"
-        await update.message.reply_text("✅ Nom saqlandi: " + text + "\n\n2-qadam: Menyuni yozing - har bir qatorga 1 ta taom:\n\n*Namuna:*\nOsh - 35000\nShashlik - 45000\nLavash - 38000\n\nKamida 1 ta taom yozing, keyin yuboring:", parse_mode="Markdown")
+        await update.message.reply_text("✅ Nom saqlandi: " + text + "\n\n4-qadam: Menyuni yozing - har bir qatorga 1 ta taom:\n\n*Namuna:*\nOsh - 35000\nShashlik - 45000\nLavash - 38000\n\nKamida 1 ta taom yozing, keyin yuboring:", parse_mode="Markdown")
         return True
     if step == "reg_menu":
         menu = {}
@@ -319,7 +339,7 @@ async def handle_reg_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reg["menu"] = menu
         context.user_data["reg"] = reg
         context.user_data["step"] = "reg_delivery"
-        await update.message.reply_text(f"✅ Menyu saqlandi: {len(menu)} ta taom.\n\n3-qadam: Yetkazib berish narxini yozing (faqat raqam, so'mda):\nMasalan: 15000\n100 000 dan yuqoriga bepul bo'ladi.")
+        await update.message.reply_text(f"✅ Menyu saqlandi: {len(menu)} ta taom.\n\n5-qadam: Yetkazib berish narxini yozing (faqat raqam, so'mda):\nMasalan: 15000\n100 000 dan yuqoriga bepul bo'ladi.")
         return True
     if step == "reg_delivery":
         try: delivery = int(text.replace(" ","").replace("so'm",""))
@@ -329,7 +349,7 @@ async def handle_reg_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reg["delivery"] = delivery
         context.user_data["reg"] = reg
         context.user_data["step"] = "reg_phone"
-        await update.message.reply_text("✅ Yetkazish narxi saqlandi.\n\n4-qadam: Telefon raqamingizni yuboring - pastdagi tugmani bosing 👇",
+        await update.message.reply_text("✅ Yetkazish narxi saqlandi.\n\n6-qadam: Telefon raqamingizni yuboring - pastdagi tugmani bosing 👇",
             reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📞 Raqamni yuborish", request_contact=True)]], resize_keyboard=True, one_time_keyboard=True))
         return True
     return False
@@ -344,17 +364,18 @@ async def finish_reg_with_phone(update: Update, context: ContextTypes.DEFAULT_TY
     base = key; i = 2
     while key in DB["restaurants"]:
         key = f"{base}_{i}"; i+=1
-    DB["restaurants"][key] = {"name": reg["name"], "admin": uid, "delivery": reg.get("delivery", 15000), "menu": reg.get("menu", {}), "active": True, "phone": DB["users"].get(str(uid), {}).get("phone","")}
+    DB["restaurants"][key] = {"name": reg["name"], "admin": uid, "delivery": reg.get("delivery", 15000), "menu": reg.get("menu", {}), "active": False, "pending": True, "stir": reg.get("stir",""), "guvohnoma": reg.get("guvohnoma",""), "phone": DB["users"].get(str(uid), {}).get("phone","")}
     save()
     # Avtomatik rolini restoran qilamiz + QULF: endi boshqa rolga o'ta olmaydi
     DB["users"][str(uid)]["role"] = "restaurant"
     DB["users"][str(uid)]["locked_role"] = "restaurant"; save()
     context.user_data["step"] = None
     context.user_data.pop("reg", None)
-    await update.message.reply_text(f"🎉 *Tabriklaymiz! Restoraningiz ro'yxatdan o'tdi!*\n\n🏪 {reg['name']}\n🍔 {len(reg.get('menu',{}))} ta taom\n🚚 Yetkazish: {reg.get('delivery',15000):,} so'm\n\nEndi mijozlar sizni ro'yxatda ko'radi. Buyurtma tushsa shu yerga keladi.\nMenyuni o'zgartirish uchun: Restoran panelingizni oching",
-        parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏪 Restoran panelim", callback_data="setrole_restaurant")]]))
-    # Super adminga xabar
-    try: await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"🆕 Yangi restoran ro'yxatdan o'tdi!\n🏪 {reg['name']}\n👤 {update.effective_user.first_name} | ID: {uid}\n📞 {DB['users'].get(str(uid),{}).get('phone','')}")
+    await update.message.reply_text(f"⏳ *Arizangiz qabul qilindi - TASDIQLASH KUTILMOQDA!*\n\n🏪 {reg['name']}\n🪪 STIR: {reg.get('stir','')}\n📜 Guvohnoma: {reg.get('guvohnoma','')}\n🍔 {len(reg.get('menu',{}))} ta taom\n🚚 Yetkazish: {reg.get('delivery',15000):,} so'm\n\n⚠️ Super Admin guvohnomangizni tekshiradi.\nTasdiqlansa - restoraningiz mijozlarga ko'rinadi va panelga kira olasiz.\nTasdiqlanmasa - sababi aytiladi.\n\nIltimos kuting...",
+        parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
+    # Super adminga xabar - STIR + Guvohnoma bilan + Tasdiqlash tugmalari
+    try: await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"🆕 Yangi restoran TASDIQLASHNI KUTMOQDA!\n\n🏪 {reg['name']}\n👤 {update.effective_user.first_name} | ID: {uid}\n📞 {DB['users'].get(str(uid),{}).get('phone','')}\n🪪 STIR: {reg.get('stir','')}\n📜 Guvohnoma: {reg.get('guvohnoma','')}\n🍔 {len(reg.get('menu',{}))} ta taom\n\n⚠️ STIR va Guvohnomani tekshiring! To'g'ri bo'lsa - Tasdiqlash ni bosing, noto'g'ri bo'lsa - Rad etish ni bosing.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"admin_rest_approve_{uid}")],[InlineKeyboardButton("❌ Rad etish", callback_data=f"admin_rest_reject_{uid}")]]))
     except: pass
     return True
 
@@ -373,6 +394,14 @@ async def rest_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_new_window(update, context, locked_msg(_u_rp.get("locked_role")), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
         return
     key, r = _my_rest(q.from_user.id)
+    if r and r.get("pending"):
+        await send_new_window(update, context, f"⏳ *Tasdiqlash kutilmoqda!*\n\n🏪 {r.get('name','')}\n🪪 STIR: {r.get('stir','')}\n📜 Guvohnoma: {r.get('guvohnoma','')}\n\nSuper Admin guvohnomangizni tekshirayapti.\nTasdiqlanmaguncha restoran paneliga kira olmaysiz va mijozlar sizni ko'rmaydi.\n\nIltimos kuting...",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+        return
+    if r and not r.get("stir"):
+        await send_new_window(update, context, "⚠️ *STIR / Guvohnoma kerak!*\n\nSiz eski ro'yxatdan o'tgansiz - STIR va Guvohnomangiz yo'q.\nRestoran bo'limiga kirish uchun ularni kiritishingiz kerak.\n\nSuper Adminga murojaat qiling yoki qaytadan ro'yxatdan o'ting.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+        return
     if not r:
         await q.edit_message_text("❌ Sizda restoran yo'q. Avval ro'yxatdan o'ting.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("➕ Ro'yxatdan o'tish", callback_data="register_rest")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
@@ -1595,6 +1624,39 @@ async def admin_rest_pay_ok(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: pass
 
 
+
+# --- SUPER ADMIN: Restoran STIR/Guvohnoma ni tasdiqlash ---
+async def admin_rest_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    if q.from_user.id != SUPER_ADMIN:
+        await q.answer("Faqat Super Admin", show_alert=True); return
+    uid = int(q.data.replace("admin_rest_approve_", ""))
+    key, r = _my_rest(uid)
+    if not r:
+        await q.edit_message_text("❌ Restoran topilmadi."); return
+    r["active"] = True; r["pending"] = False; save()
+    await q.edit_message_text(f"✅ Tasdiqlandi!\n\n🏪 {r.get('name','')}\n🪪 STIR: {r.get('stir','')}\n📜 Guvohnoma: {r.get('guvohnoma','')}\n\nEndi mijozlar bu restoranni ko'radi.")
+    try: await context.bot.send_message(chat_id=uid, text=f"🎉 *Tabriklaymiz! Restoraningiz TASDIQLANDI!*\n\n🏪 {r.get('name','')}\n🪪 STIR: {r.get('stir','')}\n📜 Guvohnoma: {r.get('guvohnoma','')}\n\nEndi mijozlar sizni ro'yxatda ko'radi, buyurtma tushsa shu yerga keladi.\nPanelga kiring va menyuni boshqaring 👇", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏪 Restoran panelim", callback_data="rest_panel")]]))
+    except: pass
+
+async def admin_rest_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    if q.from_user.id != SUPER_ADMIN:
+        await q.answer("Faqat Super Admin", show_alert=True); return
+    uid = int(q.data.replace("admin_rest_reject_", ""))
+    key, r = _my_rest(uid)
+    if not r:
+        await q.edit_message_text("❌ Restoran topilmadi."); return
+    name = r.get("name","")
+    # Rad etildi - restoranni o'chiramiz, qaytadan to'g'ri hujjat bilan ro'yxatdan o'tsin
+    del DB["restaurants"][key]
+    if str(uid) in DB["users"]:
+        DB["users"][str(uid)]["locked_role"] = None; DB["users"][str(uid)]["role"] = "client"
+    save()
+    await q.edit_message_text(f"❌ Rad etildi!\n\n🏪 {name} o'chirildi.\nSabab: STIR / Guvohnoma noto'g'ri yoki tasdiqlanmadi.")
+    try: await context.bot.send_message(chat_id=uid, text=f"❌ *Restoraningiz RAD ETILDI!*\n\n🏪 {name}\n\nSabab: STIR yoki Guvohnoma raqami noto'g'ri / tasdiqlanmadi.\n\nTo'g'ri hujjatlar bilan qaytadan ro'yxatdan o'ting 👇", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏪 Qaytadan ro'yxatdan o'tish", callback_data="register_rest")]]))
+    except: pass
+
 async def admin_money_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     if q.from_user.id != SUPER_ADMIN:
@@ -1754,6 +1816,8 @@ async def main():
     app.add_handler(CallbackQueryHandler(admin_stats, pattern="^admin_stats$"))
     app.add_handler(CallbackQueryHandler(admin_panel, pattern="^admin_panel$"))
     app.add_handler(CallbackQueryHandler(admin_money_info, pattern="^admin_money_info$"))
+    app.add_handler(CallbackQueryHandler(admin_rest_approve, pattern="^admin_rest_approve_"))
+    app.add_handler(CallbackQueryHandler(admin_rest_reject, pattern="^admin_rest_reject_"))
     app.add_handler(CallbackQueryHandler(admin_rest_payouts, pattern="^admin_rest_payouts$"))
     app.add_handler(CallbackQueryHandler(admin_rest_pay_ask, pattern="^restpay_"))
     app.add_handler(CallbackQueryHandler(admin_rest_pay_ok, pattern="^restpayok_"))
