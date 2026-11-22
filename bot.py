@@ -765,7 +765,18 @@ async def handle_courier_reg_text(update: Update, context: ContextTypes.DEFAULT_
         if len(text) < 4:
             await courier_msg_new(update, context, "❌ Parol kamida 4 ta belgi bo'lishi kerak. Qaytadan yozing:")
             return True
-        rc = context.user_data.get("reg_courier", {}); rc["pass_hash"] = courier_pass_hash(text); context.user_data["reg_courier"] = rc
+        rc = context.user_data.get("reg_courier", {})
+        # QAYTA TIKLASH: bot qayta ishga tushgan bo'lsa reg_courier bo'sh bo'ladi - DB dagi loginni olamiz
+        if not rc.get("login"):
+            _db_login = DB["users"].get(uid, {}).get("courier_login", "")
+            if _db_login:
+                rc["login"] = _db_login
+            else:
+                # Login ham yo'q - demak ro'yxat yarim qolgan, qaytadan boshlaymiz
+                context.user_data["step"] = "regcourier_login"
+                await courier_msg_new(update, context, "⚠️ Bot qayta ishga tushdi, ro'yxat yarim qoldi.\n\nQaytadan login o'ylab toping (masalan: farzona01):")
+                return True
+        rc["pass_hash"] = courier_pass_hash(text); context.user_data["reg_courier"] = rc
         # Ro'yxatni yakunlaymiz - finish funksiyasi endi login/parol bilan saqlaydi
         await finish_courier_reg_with_phone(update, context)
         return True
@@ -817,10 +828,19 @@ async def handle_courier_reg_text(update: Update, context: ContextTypes.DEFAULT_
     return False
 
 async def finish_courier_reg_with_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get("step") != "regcourier_phone":
+    # TUZATILDI: avval faqat regcourier_phone da ishlardi, parol yozilganda step=regcourier_password bo'lgani uchun hech narsa qilmay jim turardi!
+    # Endi ikkala qadamda ham ishlaydi: telefon kelganda (login so'raydi) + parol kelganda (yakunlaydi)
+    if context.user_data.get("step") not in ("regcourier_phone", "regcourier_password"):
         return False
     rc = context.user_data.get("reg_courier", {})
     uid = str(update.effective_user.id)
+    # QAYTA TIKLASH: Render qayta ishga tushsa reg_courier o'chib ketadi. DB da login bo'lsa - shuni ishlatamiz.
+    if not rc.get("login") and DB["users"].get(uid, {}).get("courier_login"):
+        rc["login"] = DB["users"][uid]["courier_login"]
+        context.user_data["reg_courier"] = rc
+    if not rc.get("pass_hash") and DB["users"].get(uid, {}).get("courier_pass_hash"):
+        rc["pass_hash"] = DB["users"][uid]["courier_pass_hash"]
+        context.user_data["reg_courier"] = rc
     DB["users"][uid]["role"] = "courier"
     DB["users"][uid]["courier_registered"] = True
     DB["users"][uid]["courier_transport"] = rc.get("transport", "🛵 Moped")
