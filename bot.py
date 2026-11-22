@@ -893,6 +893,70 @@ async def client_topup_approve(update: Update, context: ContextTypes.DEFAULT_TYP
         except: pass
 
 # --- MIJOZ ---
+
+# --- SAVAT (MIJOZGA DOIM KO'RINADI) ---
+def _cart_text(cart):
+    if not cart:
+        return "🛒 Savat: bo'sh"
+    lines = []
+    for i, (n, pr) in enumerate(cart, 1):
+        lines.append(f"{i}. {n} - {pr:,} so'm")
+    total = sum(pr for _, pr in cart)
+    return "🛒 *SAVATINGIZ:*\n" + "\n".join(lines) + f"\n\n📦 Jami taom: {len(cart)} ta\n💰 Jami summa: {total:,} so'm"
+
+def _menu_kb(r, cart):
+    _sold = set(r.get("sold_out", []))
+    kb = []
+    for n, pr in r["menu"].items():
+        if n in _sold:
+            kb.append([InlineKeyboardButton(f"❌ {n} - Tugadi", callback_data="sold_out_noop")])
+        else:
+            kb.append([InlineKeyboardButton(f"{n} - {pr:,} so'm", callback_data=f"add_{n}_{pr}")])
+    total = sum(pr for _, pr in cart)
+    if cart:
+        kb.append([InlineKeyboardButton(f"🛒 Savatni ko'rish ({len(cart)} ta - {total:,} so'm)", callback_data="cart_view")])
+        kb.append([InlineKeyboardButton("✅ Savatni tasdiqlash", callback_data="confirm_cart")])
+    else:
+        kb.append([InlineKeyboardButton("🛒 Savat bo'sh", callback_data="cart_view")])
+    kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="client_order")])
+    return InlineKeyboardMarkup(kb)
+
+async def cart_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    cart = context.user_data.get("cart", [])
+    cafe_key = context.user_data.get("cafe")
+    r = DB["restaurants"].get(cafe_key, {}) if cafe_key else {}
+    if not cart:
+        await send_new_window(update, context, "🛒 Savatingiz bo'sh.\n\nAvval menyudan taom tanlang.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🍔 Menyuga qaytish", callback_data=f"cafe_{cafe_key}" if cafe_key else "client_order")],
+                [InlineKeyboardButton("⬅️ Asosiy", callback_data="back_main")],
+            ]))
+        return
+    kb = []
+    for i, (n, pr) in enumerate(cart):
+        kb.append([InlineKeyboardButton(f"❌ {n} - {pr:,} so'm ni o'chirish", callback_data=f"cart_del_{i}")])
+    kb.append([InlineKeyboardButton("✅ Savatni tasdiqlash", callback_data="confirm_cart")])
+    kb.append([InlineKeyboardButton("🍔 Menyuga qaytish", callback_data=f"cafe_{cafe_key}" if cafe_key else "client_order")])
+    await send_new_window(update, context, _cart_text(cart) + f"\n\n🏪 Restoran: {r.get('name','')}\n\nO'chirmoqchi bo'lgan taomni bosing:",
+        reply_markup=InlineKeyboardMarkup(kb))
+
+async def cart_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    idx = int(q.data.replace("cart_del_", ""))
+    cart = context.user_data.get("cart", [])
+    if 0 <= idx < len(cart):
+        removed = cart.pop(idx)
+        context.user_data["cart"] = cart
+        await q.answer(f"{removed[0]} o'chirildi ❌")
+    # Savat bo'sh bo'lsa menyuga qaytamiz, bo'lmasa savatni yana ko'rsatamiz
+    if not cart:
+        cafe_key = context.user_data.get("cafe")
+        r2 = DB["restaurants"].get(cafe_key, {}) if cafe_key else {}
+        await send_new_window(update, context, f"🛒 Savat bo'shadi.\n\n🏪 {r2.get('name','')}\nYana taom tanlang:", reply_markup=_menu_kb(r2, []) if r2 else InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Asosiy", callback_data="back_main")]]))
+        return
+    await cart_view(update, context)
+
 async def client_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     # QULF: kuryer/restoran mijoz bo'lib buyurtma berolmaydi
@@ -909,34 +973,55 @@ async def client_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cafe_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     key = q.data.replace("cafe_", "", 1)
+    # Faqat BOSHQA restoran tanlansa savat tozalanadi. O'z restoraniga qaytsa - savat turadi!
+    if context.user_data.get("cafe") != key:
+        context.user_data["cart"] = []
     context.user_data["cafe"] = key
-    context.user_data["cart"] = []
+    cart = context.user_data.get("cart", [])
     r = DB["restaurants"][key]
-    _sold = set(r.get("sold_out", []))
-    kb = []
-    for n, p in r["menu"].items():
-        if n in _sold:
-            kb.append([InlineKeyboardButton(f"❌ {n} - Tugadi", callback_data="sold_out_noop")])
-        else:
-            kb.append([InlineKeyboardButton(f"{n} - {p} so'm", callback_data=f"add_{n}_{p}")])
-    kb.append([InlineKeyboardButton("✅ Savatni tasdiqlash", callback_data="confirm_cart")])
-    kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="client_order")])
     _del = r.get("delivery", 15000)
-    try: await q.message.delete()
-    except: pass
-    await context.bot.send_message(chat_id=q.from_user.id, text=f"🏪 {r['name']}\n⏱ Yetkazish: {_del:,} so\'m (100 000 dan yuqoriga BEPUL)\nMenyu:", reply_markup=InlineKeyboardMarkup(kb))
+    text = f"🏪 {r['name']}\n⏱ Yetkazish: {_del:,} so'm (100 000 dan yuqoriga BEPUL)\n\nMenyu:"
+    if cart:
+        text += f"\n\n{_cart_text(cart)}"
+    await send_new_window(update, context, text, reply_markup=_menu_kb(r, cart))
 
 async def add_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
-    _, name, price = q.data.split("_")
+    # Nomida _ bo'lsa ham buzilmasin: oxirgisi narx, o'rtasi nom
+    _parts = q.data.split("_")
+    price = _parts[-1]; name = "_".join(_parts[1:-1])
     cart = context.user_data.get("cart", []); cart.append((name, int(price)))
     context.user_data["cart"] = cart
-    await q.answer(f"{name} qo'shildi ✅ | Savat: {len(cart)} ta")
+    # ASOSIY TUZATISH: endi faqat kichik yozuv emas - xabarni o'zini yangilaymiz, savat ko'rinadi
+    cafe_key = context.user_data.get("cafe")
+    r = DB["restaurants"].get(cafe_key, {}) if cafe_key else {}
+    _del = r.get("delivery", 15000) if r else 15000
+    text = f"🏪 {r.get('name','')}\n⏱ Yetkazish: {_del:,} so'm (100 000 dan yuqoriga BEPUL)\n\n✅ {name} qo'shildi!\n\n{_cart_text(cart)}\n\nYana taom tanlang yoki savatni tasdiqlang:"
+    try: await q.edit_message_text(text, reply_markup=_menu_kb(r, cart))
+    except Exception:
+        await send_new_window(update, context, text, reply_markup=_menu_kb(r, cart))
 
 async def confirm_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     cart = context.user_data.get("cart", [])
-    if not cart: await q.answer("Savat bo'sh!"); return
+    if not cart:
+        await q.answer("Savat bo'sh! Avval taom tanlang.", show_alert=True); return
+    # Avval savatni to'liq ko'rsatamiz - mijoz necha taom olganini ko'rib tasdiqlaydi
+    cafe_key = context.user_data.get("cafe")
+    r = DB["restaurants"].get(cafe_key, {}) if cafe_key else {}
+    _del = r.get("delivery", 15000) if r else 15000
+    _sub = sum(pr for _, pr in cart)
+    _del2 = 0 if _sub >= 100000 else _del
+    await send_new_window(update, context, _cart_text(cart) + f"\n\n🏪 Restoran: {r.get('name','')}\n🚗 Yetkazish: {_del2:,} so'm\n💰 JAMI: {_sub + _del2:,} so'm\n\nTasdiqlaysizmi?",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Ha, tasdiqlash", callback_data="confirm_cart_yes")],
+            [InlineKeyboardButton("🍔 Yana taom qo'shish", callback_data=f"cafe_{cafe_key}" if cafe_key else "client_order")],
+            [InlineKeyboardButton("🛒 Savatni ko'rish / o'chirish", callback_data="cart_view")],
+        ]))
+    return
+
+async def confirm_cart_yes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
     context.user_data["step"] = "phone"
     # YANGI OYNA: eski panelni o'chirib, faqat bitta yangi oyna qoldiramiz
     try: await q.message.delete()
@@ -1465,6 +1550,9 @@ async def main():
     app.add_handler(CallbackQueryHandler(rest_card_ask, pattern="^rest_card$"))
     app.add_handler(CallbackQueryHandler(add_item, pattern="^add_"))
     app.add_handler(CallbackQueryHandler(confirm_cart, pattern="^confirm_cart$"))
+    app.add_handler(CallbackQueryHandler(confirm_cart_yes, pattern="^confirm_cart_yes$"))
+    app.add_handler(CallbackQueryHandler(cart_view, pattern="^cart_view$"))
+    app.add_handler(CallbackQueryHandler(cart_del, pattern="^cart_del_"))
     app.add_handler(CallbackQueryHandler(pay_select, pattern="^pay_"))
     async def _sold_out_noop(update, context):
         q = update.callback_query; await q.answer("❌ Bu taom hozircha tugagan", show_alert=True)
@@ -1505,4 +1593,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
