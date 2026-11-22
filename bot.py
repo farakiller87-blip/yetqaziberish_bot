@@ -937,11 +937,14 @@ async def courier_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
-    # TUZATILDI: kanaldan bosilsa - qotib qolmasin, botga yo'naltiramiz
+    # TUZATILDI: oid/order ni ENG BIRINCHI olamiz - oldin ular pastda aniqlanardi, kanaldan bosganda NameError bo'lib tugma ishlamasdi. Shu edi asosiy sabab!
+    oid = str(q.data.split("_")[1])
+    order = DB["orders"].get(oid)
     try:
         _chat_type = q.message.chat.type if q.message and q.message.chat else "private"
     except: _chat_type = "private"
-    if _chat_type == "channel":
+    # Guruh / super-guruh / kanal - hammasi bir xil: guruh xabarini O'CHIRMAYMIZ, faqat "OLINDI" ga yangilaymiz
+    if _chat_type in ("channel", "group", "supergroup"):
         # KANALDAN OLISH - shu yerda ishlaydi! Kanal xabarini o'chirmaymiz, faqat yangilaymiz.
         if not order or order["status"] != "to_courier":
             await q.answer("Bu buyurtma allaqachon olingan!", show_alert=True); return
@@ -950,7 +953,7 @@ async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
         order["status"] = "taken"; order["courier_id"] = q.from_user.id; order["courier_name"] = q.from_user.first_name; save()
         _u2 = DB["users"][str(q.from_user.id)]
         # 1) Kanaldagi postni "OLINDI" ga almashtiramiz - tugma yo'qoladi, boshqa kuryer bosolmaydi
-        try: await context.bot.edit_message_text(chat_id=COURIER_CHANNEL, message_id=q.message.message_id, text=f"✅ BUYURTMA #{oid} OLINDI!\n\n🚴 Kuryer: {q.from_user.first_name}\n🏪 {DB['restaurants'][order['cafe']]['name']}\n💰 {order['total']} so'm")
+        try: await context.bot.edit_message_text(chat_id=q.message.chat.id, message_id=q.message.message_id, text=f"✅ BUYURTMA #{oid} OLINDI!\n\n🚴 Kuryer: {q.from_user.first_name}\n🏪 {DB['restaurants'][order['cafe']]['name']}\n💰 {order['total']} so'm")
         except: pass
         # 2) Kuryerga SHAXSIY chatga tafsilot + YETKAZDIM tugmasini yuboramiz - keyingi ish shu yerda davom etadi
         try: await context.bot.send_message(chat_id=q.from_user.id, text=f"✅ Buyurtma #{oid} seniki! (kanaldan olding)\n\n📍 Manzil: {order['address']}\n📞 Mijoz: {order['phone']}\n💰 {order['total']} so'm\n\nYetkazib bo'lgach pastni bos:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ YETKAZDIM", callback_data=f"done_{oid}")]]))
@@ -986,8 +989,19 @@ async def courier_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     oid = str(q.data.split("_")[1]); order = DB["orders"].get(oid)
     if not order: return
     order["status"] = "done"; save()
-    uid = str(q.from_user.id); DB["users"][uid]["delivered"] = DB["users"][uid].get("delivered", 0) + 1; DB["users"][uid]["balance"] = DB["users"][uid].get("balance", 0) + 15000; save()
-    await courier_new(q, context, f"✅ Buyurtma #{oid} yetkazildi! +15000 so'm hisobingga qo'shildi.")
+    uid = str(q.from_user.id)
+    if uid not in DB["users"]: DB["users"][uid] = {"name": q.from_user.first_name, "role": "courier", "balance": 0, "delivered": 0}
+    DB["users"][uid]["delivered"] = DB["users"][uid].get("delivered", 0) + 1; DB["users"][uid]["balance"] = DB["users"][uid].get("balance", 0) + 15000; save()
+    # TUZATILDI: Yetkazdim dan keyin PANEL QAYTADI - oldin faqat matn kelardi, kuryer yana /start bosishga majbur bo'lardi
+    _u_done = DB["users"].get(uid, {})
+    _status_done = "🟢 ONLINE" if _u_done.get("online") else "🔴 OFFLINE"
+    await courier_new(q, context, f"✅ Buyurtma #{oid} yetkazildi! +15000 so'm hisobingga qo'shildi.\n\n💰 Balans: {_u_done.get('balance',0):,} so'm\n✅ Yetkazgan: {_u_done.get('delivered',0)} ta\nHolat: {_status_done}",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🚴 Mening kuryer panelim", callback_data="courier_panel")],
+            [InlineKeyboardButton("📦 Bo'sh buyurtmalar", callback_data="courier_list")],
+            [InlineKeyboardButton("💰 Mening hisobim", callback_data="courier_balance_new")],
+            [InlineKeyboardButton("🟢 ONLINE / 🔴 OFFLINE", callback_data="courier_toggle")],
+        ]), parse_mode=None)
     await context.bot.send_message(chat_id=order["user_id"], text=f"✅ Buyurtmangiz #{oid} yetkazildi! Yoqimli ishtaha 😋\n\nKuryerni baholang:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⭐️⭐️⭐️⭐️⭐️", callback_data=f"rate_5_{oid}"), InlineKeyboardButton("⭐️⭐️⭐️", callback_data=f"rate_3_{oid}")]]))
     await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"✅ #{oid} yetkazildi. Kuryer: {DB['users'][uid]['name']}")
 
