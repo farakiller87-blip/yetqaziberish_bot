@@ -895,12 +895,26 @@ async def client_topup_approve(update: Update, context: ContextTypes.DEFAULT_TYP
 # --- MIJOZ ---
 
 # --- SAVAT (MIJOZGA DOIM KO'RINADI) ---
+def _group_cart(cart):
+    # Bir xil taomni birlashtiramiz: [("Shashlik",45000),("Shashlik",45000)] -> [("Shashlik",45000,2,90000)]
+    grouped = []
+    for n, pr in cart:
+        for g in grouped:
+            if g[0] == n and g[1] == pr:
+                g[2] += 1; g[3] += pr; break
+        else:
+            grouped.append([n, pr, 1, pr])
+    return grouped
+
 def _cart_text(cart):
     if not cart:
         return "🛒 Savat: bo'sh"
     lines = []
-    for i, (n, pr) in enumerate(cart, 1):
-        lines.append(f"{i}. {n} - {pr:,} so'm")
+    for i, (n, pr, qty, sub) in enumerate(_group_cart(cart), 1):
+        if qty > 1:
+            lines.append(f"{i}. {n} x{qty} - {sub:,} so'm ({pr:,} x {qty})")
+        else:
+            lines.append(f"{i}. {n} - {pr:,} so'm")
     total = sum(pr for _, pr in cart)
     return "🛒 *SAVATINGIZ:*\n" + "\n".join(lines) + f"\n\n📦 Jami taom: {len(cart)} ta\n💰 Jami summa: {total:,} so'm"
 
@@ -934,8 +948,11 @@ async def cart_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]))
         return
     kb = []
-    for i, (n, pr) in enumerate(cart):
-        kb.append([InlineKeyboardButton(f"❌ {n} - {pr:,} so'm ni o'chirish", callback_data=f"cart_del_{i}")])
+    for i, (n, pr, qty, sub) in enumerate(_group_cart(cart)):
+        if qty > 1:
+            kb.append([InlineKeyboardButton(f"➖ {n} x{qty} - {sub:,} so'm (1 ta kamaytirish)", callback_data=f"cart_del_{i}")])
+        else:
+            kb.append([InlineKeyboardButton(f"❌ {n} - {pr:,} so'm ni o'chirish", callback_data=f"cart_del_{i}")])
     kb.append([InlineKeyboardButton("✅ Savatni tasdiqlash", callback_data="confirm_cart")])
     kb.append([InlineKeyboardButton("🍔 Menyuga qaytish", callback_data=f"cafe_{cafe_key}" if cafe_key else "client_order")])
     await send_new_window(update, context, _cart_text(cart) + f"\n\n🏪 Restoran: {r.get('name','')}\n\nO'chirmoqchi bo'lgan taomni bosing:",
@@ -945,10 +962,19 @@ async def cart_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     idx = int(q.data.replace("cart_del_", ""))
     cart = context.user_data.get("cart", [])
-    if 0 <= idx < len(cart):
-        removed = cart.pop(idx)
+    grouped = _group_cart(cart)
+    if 0 <= idx < len(grouped):
+        name_to_remove = grouped[idx][0]
+        # Faqat 1 tasini o'chiramiz - qolgan 2 tasi turadi
+        for j, (n, pr) in enumerate(cart):
+            if n == name_to_remove:
+                removed = cart.pop(j); break
         context.user_data["cart"] = cart
-        await q.answer(f"{removed[0]} o'chirildi ❌")
+        _left = sum(1 for n, _ in cart if n == name_to_remove)
+        if _left > 0:
+            await q.answer(f"{name_to_remove} 1 taga kamaydi ➖ | Qoldi: x{_left}")
+        else:
+            await q.answer(f"{name_to_remove} o'chirildi ❌")
     # Savat bo'sh bo'lsa menyuga qaytamiz, bo'lmasa savatni yana ko'rsatamiz
     if not cart:
         cafe_key = context.user_data.get("cafe")
@@ -1130,7 +1156,9 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["step"] = None
     r = DB["restaurants"][cafe_key]
     text = f"🔥 YANGI BUYURTMA #{oid}!\n\n🏪 {r['name']}\n👤 {DB['users'][uid]['name']} | 📞 {DB['users'][uid].get('phone')}\n📍 {address}\n"
-    for n, p in cart: text += f"🛒 {n} - {p}\n"
+    for n, pr, qty, sub in _group_cart(cart):
+        if qty > 1: text += f"🛒 {n} x{qty} - {sub:,} so'm\n"
+        else: text += f"🛒 {n} - {pr:,} so'm\n"
     _pay_note = " | 💳 Hisobdan yechildi" if payment == "Naqd 💵" else ""
     text += f"\n🚗 Yetkazib berish: {context.user_data.get(chr(100)+chr(101)+chr(108)+chr(105)+chr(118)+chr(101)+chr(114)+chr(121)+chr(95)+chr(102)+chr(101)+chr(101), 0)} \n💰 JAMI: {total} so'm | {payment}{_pay_note}"
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ QABUL QILISH", callback_data=f"accept_{oid}"), InlineKeyboardButton("❌ RAD ETISH", callback_data=f"reject_{oid}")]])
@@ -1593,3 +1621,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
