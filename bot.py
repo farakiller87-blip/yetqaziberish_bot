@@ -518,6 +518,26 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _fid = update.message.photo[-1].file_id
         r.setdefault("menu_photos", {})[_prod] = _fid; save(); context.user_data["step"] = None
         await update.message.reply_text(f"✅ Rasm saqlandi!\n\n{_groc_emoji(_prod)} {_prod} - endi mijozlar do'konda rasmi bilan ko'radi 📸", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Panelga qaytish", callback_data="groc_panel")]])); return
+    # KURYER TEXNIKA RASMINI QAYTA YUBORISH (rad etilganda)
+    if context.user_data.get("step") == "courier_vehicle_reupload":
+        _fid2 = update.message.photo[-1].file_id
+        _uid2 = str(update.effective_user.id)
+        DB["users"][_uid2]["courier_vehicle_photo"] = _fid2; DB["users"][_uid2]["courier_vehicle_pending"] = True; DB["users"][_uid2]["courier_vehicle_rejected"] = False; DB["users"][_uid2]["courier_approved"] = False; save()
+        context.user_data["step"] = None
+        await courier_msg_new(update, context, "✅ Texnika rasmi qayta yuborildi!\n\n⏳ Super Admin qayta ko'rib tasdiqlashi kutilmoqda.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Kuryer panelim", callback_data="courier_panel")]]))
+        try:
+            _uu = DB["users"][_uid2]
+            await context.bot.send_photo(chat_id=SUPER_ADMIN, photo=_fid2, caption=f"🔄 *KURYER TEXNIKA RASMINI QAYTA YUBORDI!*\n\n🚴 {_uu.get('name')} | ID: {_uid2}\n🚗 Transport: {_uu.get('courier_transport')}\n📍 Hudud: {_uu.get('courier_area')}", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"admin_courier_approve_{_uid2}")],[InlineKeyboardButton("❌ Rad etish", callback_data=f"admin_courier_reject_{_uid2}")]]))
+        except: pass
+        return
+    # KURYER TEXNIKA RASMI (ro'yxatdan o'tishda)
+    if context.user_data.get("step") == "regcourier_vehicle_photo":
+        _fid = update.message.photo[-1].file_id
+        rc = context.user_data.get("reg_courier", {}); rc["vehicle_photo"] = _fid; context.user_data["reg_courier"] = rc
+        context.user_data["step"] = "regcourier_area"
+        await courier_msg_new(update, context, f"✅ Texnika rasmi qabul qilindi! 📸\n\nTransport: {rc.get('transport')}\n\n3-qadam: Qaysi hududda ishlaysiz? Yozing:\nMasalan: Yashil Bozor, 5-kichik daxa, Aeroport\nYoki: Butun Termiz",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="back_main")]]))
+        return
     await update.message.reply_text("📸 Rasm qabul qilindi! Agar taomga rasm qo'shmoqchi bo'lsangiz - Restoran panel → 📸 Taomga rasm qo'shish ni bosing.")
 
 async def rest_delivery_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -637,8 +657,17 @@ async def register_courier_transport(update: Update, context: ContextTypes.DEFAU
     tr_map = {"courier_tr_moped":"🛵 Moped / Skuter","courier_tr_car":"🚗 Mashina","courier_tr_bike":"🚲 Velosiped","courier_tr_walk":"🚶 Piyoda"}
     tr = tr_map.get(q.data, "🛵 Moped")
     context.user_data["reg_courier"] = {"transport": tr}
-    context.user_data["step"] = "regcourier_area"
-    _m2 = await courier_new(q, context, f"✅ Transport: {tr}\n\n2-qadam: Qaysi hududda ishlaysiz? Yozing:\nMasalan: Yashil Bozor, 5-kichik daxa, Aeroport\nYoki: Butun Termiz",
+    # 🚶 PIYODA bo'lsa - texnika rasmi KERAK EMAS, to'g'ri hududga o'tamiz
+    if "Piyoda" in tr or "walk" in q.data:
+        context.user_data["step"] = "regcourier_area"
+        _m2 = await courier_new(q, context, f"✅ Transport: {tr}\n\n🚶 Piyoda kuryerlar uchun texnika rasmi kerak emas!\n\n2-qadam: Qaysi hududda ishlaysiz? Yozing:\nMasalan: Yashil Bozor, 5-kichik daxa, Aeroport\nYoki: Butun Termiz",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="back_main")]]))
+        try: context.user_data["courier_panel_msg_id"] = _m2.message_id
+        except: pass
+        return
+    # 🛵 / 🚲 / 🚗 bo'lsa - TEXNIKA RASMI SHART!
+    context.user_data["step"] = "regcourier_vehicle_photo"
+    _m2 = await courier_new(q, context, f"✅ Transport: {tr}\n\n📸 2-qadam: TEXNIKANGIZNING RASMINI YUBORING!\n\n{tr} ni butunligicha ko'rinadigan qilib rasmga olib yuboring.\nRaqami (nomeri) ko'rinsa - yanada yaxshi!\n\n⚠️ Rasm kelmaguncha ro'yxat davom etmaydi.\nSuper Admin rasmingizni ko'rib tasdiqlaydi.",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="back_main")]]))
     try: context.user_data["courier_panel_msg_id"] = _m2.message_id
     except: pass
@@ -696,6 +725,40 @@ async def courier_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("⬅️ Asosiy", callback_data="back_main")],
     ])
     await courier_new(q, context, txt, reply_markup=kb, parse_mode="Markdown")
+
+
+async def admin_courier_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    if q.from_user.id != SUPER_ADMIN: await q.answer("Faqat admin", show_alert=True); return
+    uid = q.data.replace("admin_courier_approve_", "")
+    u = DB["users"].get(uid)
+    if not u: await q.answer("Kuryer topilmadi"); return
+    u["courier_approved"] = True; u["courier_vehicle_pending"] = False; save()
+    try: await context.bot.send_message(chat_id=int(uid), text=f"✅ *Texnikangiz tasdiqlandi!*\n\n{u.get('courier_transport')} - rasmingiz to'g'ri deb topildi.\n\nEndi ONLINE bo'ling - buyurtmalar sizga keladi! 🚴", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Kuryer panelim", callback_data="courier_panel")]]))
+    except: pass
+    try: await q.edit_message_caption(caption=f"✅ TASDIQLANDI!\n\n🚴 {u.get('name')} | ID: {uid}\n🚗 {u.get('courier_transport')} | 📍 {u.get('courier_area')}\nKuryer endi ishlay oladi.")
+    except:
+        try: await q.edit_message_text(f"✅ TASDIQLANDI! Kuryer {u.get('name')} ({uid}) - texnika to'g'ri.")
+        except: pass
+
+async def admin_courier_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    if q.from_user.id != SUPER_ADMIN: await q.answer("Faqat admin", show_alert=True); return
+    uid = q.data.replace("admin_courier_reject_", "")
+    u = DB["users"].get(uid)
+    if not u: await q.answer("Kuryer topilmadi"); return
+    u["courier_approved"] = False; u["courier_vehicle_pending"] = True; u["courier_vehicle_rejected"] = True; save()
+    try: await context.bot.send_message(chat_id=int(uid), text=f"❌ *Texnikangiz rasmi rad etildi!*\n\n{u.get('courier_transport')} - rasmingiz noto'g'ri / ko'rinmayapti deb topildi.\n\nTexnikangizni qaytadan chiroyli qilib rasmga olib yuboring.\nPaneldan qayta yuborishingiz mumkin.", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📸 Texnika rasmini qayta yuborish", callback_data="courier_reupload_vehicle")],[InlineKeyboardButton("🚴 Kuryer panelim", callback_data="courier_panel")]]))
+    except: pass
+    try: await q.edit_message_caption(caption=f"❌ RAD ETILDI!\n\n🚴 {u.get('name')} | ID: {uid}\n🚗 {u.get('courier_transport')} - rasm noto'g'ri.")
+    except:
+        try: await q.edit_message_text(f"❌ RAD ETILDI! Kuryer {u.get('name')} ({uid})")
+        except: pass
+
+async def courier_reupload_vehicle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    context.user_data["step"] = "courier_vehicle_reupload"
+    await courier_new(q, context, "📸 *Texnikangiz rasmini qayta yuboring!*\n\nTexnikani butunligicha, raqami ko'rinadigan qilib rasmga olib yuboring.\nSuper Admin qayta ko'rib tasdiqlaydi.", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="courier_panel")]]))
 
 async def courier_balance_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -912,10 +975,30 @@ async def finish_courier_reg_with_phone(update: Update, context: ContextTypes.DE
     context.user_data["step"] = None
     context.user_data["courier_logged_in"] = True
     context.user_data.pop("reg_courier", None)
-    await courier_msg_new(update, context, f"🎉 *Tabriklaymiz! Kuryer sifatida ro'yxatdan o'tdingiz!*\n\n🔐 Loginingiz: {DB['users'][uid].get('courier_login')}\n⚠️ Parolingizni eslab qoling! Panel har safar shu parol bilan ochiladi.\n\n🚗 Transport: {rc.get('transport')}\n📍 Hudud: {rc.get('area')}\n\nEndi ONLINE bo'ling - buyurtmalar sizga keladi. Har bir yetkazgan buyurtma uchun hisobingizga pul qo'shiladi.",
-        parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Kuryer panelim", callback_data="courier_panel")]]))
-    try: await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"🆕 Yangi kuryer ro'yxatdan o'tdi!\n🚴 {update.effective_user.first_name} | ID: {uid}\n🔐 Login: {DB['users'][uid].get('courier_login','-')} (parol kuryerda)\n🚗 {rc.get('transport')} | 📍 {rc.get('area')}\n📞 {DB['users'][uid].get('phone','')}")
-    except: pass
+    _is_walk2 = "Piyoda" in str(rc.get("transport", ""))
+    if _is_walk2:
+        await courier_msg_new(update, context, f"🎉 *Tabriklaymiz! Kuryer sifatida ro'yxatdan o'tdingiz!*\n\n🔐 Loginingiz: {DB['users'][uid].get('courier_login')}\n⚠️ Parolingizni eslab qoling! Panel har safar shu parol bilan ochiladi.\n\n🚗 Transport: {rc.get('transport')} (🚶 Piyoda - texnika rasmi kerak emas)\n📍 Hudud: {rc.get('area')}\n\nEndi ONLINE bo'ling - buyurtmalar sizga keladi.",
+            parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Kuryer panelim", callback_data="courier_panel")]]))
+    else:
+        await courier_msg_new(update, context, f"✅ Arizangiz qabul qilindi!\n\n🔐 Loginingiz: {DB['users'][uid].get('courier_login')}\n🚗 Transport: {rc.get('transport')}\n📍 Hudud: {rc.get('area')}\n📸 Texnika rasmi: yuborildi\n\n⏳ *Super Admin texnikangiz rasmini ko'rib tasdiqlashi kutilmoqda.*\nTasdiqlangach sizga xabar keladi, shundan keyin ONLINE bo'lib buyurtma ola olasiz.\n\n⚠️ Tasdiqlanmaguncha buyurtma ololmaysiz!",
+            parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Kuryer panelim", callback_data="courier_panel")]]))
+    # TASDIQLASH: Piyoda - darhol tasdiqlangan. Texnika (moped/velo/mashina) - Super Admin rasmini ko'rib tasdiqlashi SHART!
+    _is_walk = "Piyoda" in str(rc.get("transport", ""))
+    _vphoto = rc.get("vehicle_photo")
+    if _is_walk:
+        DB["users"][uid]["courier_approved"] = True; DB["users"][uid]["courier_vehicle_photo"] = None
+    else:
+        DB["users"][uid]["courier_approved"] = False; DB["users"][uid]["courier_vehicle_photo"] = _vphoto; DB["users"][uid]["courier_vehicle_pending"] = True
+    save()
+    if _is_walk:
+        try: await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"🆕 Yangi kuryer ro'yxatdan o'tdi (🚶 Piyoda - tasdiqlash kerak emas)!\n🚴 {update.effective_user.first_name} | ID: {uid}\n🔐 Login: {DB['users'][uid].get('courier_login','-')} (parol kuryerda)\n🚗 {rc.get('transport')} | 📍 {rc.get('area')}\n📞 {DB['users'][uid].get('phone','')}") 
+        except: pass
+    else:
+        # Super Adminga RASM bilan yuboramiz - tasdiqlash / rad etish tugmasi bilan
+        try:
+            if _vphoto: await context.bot.send_photo(chat_id=SUPER_ADMIN, photo=_vphoto, caption=f"🆕 *YANGI KURYER - TEXNIKA TASDIQLASH KERAK!*\n\n🚴 {update.effective_user.first_name} | ID: {uid}\n🔐 Login: {DB['users'][uid].get('courier_login','-')}\n🚗 Transport: {rc.get('transport')}\n📍 Hudud: {rc.get('area')}\n📞 Tel: {DB['users'][uid].get('phone','')}\n\n📸 Yuqoridagi rasm - kuryerning texnikasi.\nTasdiqlasangiz - kuryer ishlay boshlaydi.", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Tasdiqlash - Texnika to'g'ri", callback_data=f"admin_courier_approve_{uid}")],[InlineKeyboardButton("❌ Rad etish - Rasm noto'g'ri", callback_data=f"admin_courier_reject_{uid}")]]))
+            else: await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"🆕 Yangi kuryer - rasm kelmadi!\n🚴 {update.effective_user.first_name} | ID: {uid}\n🚗 {rc.get('transport')}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"admin_courier_approve_{uid}")],[InlineKeyboardButton("❌ Rad etish", callback_data=f"admin_courier_reject_{uid}")]]))
+        except: pass
     return True
 
 
@@ -1777,6 +1860,9 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def courier_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     uid = str(q.from_user.id)
+    _uu = DB["users"].get(uid, {})
+    if _uu.get("courier_registered") and not _uu.get("courier_approved", True):
+        await courier_new(q, context, "⏳ *Texnikangiz hali tasdiqlanmagan!*\n\nSuper Admin rasmingizni ko'rib chiqmoqda.\nTasdiqlangach ONLINE bo'la olasiz.\n\nRasm noto'g'ri bo'lsa - qayta yuboring:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📸 Texnika rasmini qayta yuborish", callback_data="courier_reupload_vehicle")],[InlineKeyboardButton("🚴 Panelga qaytish", callback_data="courier_panel")]]), parse_mode="Markdown"); return
     u = DB["users"][uid]
     if not u.get("phone"):
         context.user_data["step"] = "courier_phone"
@@ -1879,6 +1965,8 @@ async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # TUZATILDI: foydalanuvchi DB da bo'lmasa - KeyError bilan yiqilmasin
     if str(q.from_user.id) not in DB["users"]:
         await q.answer("Avval botda /start bosib kuryer sifatida ro'yxatdan o'ting!", show_alert=True); return
+    if DB["users"][str(q.from_user.id)].get("courier_registered") and not DB["users"][str(q.from_user.id)].get("courier_approved", True):
+        await q.answer("⏳ Texnikangiz hali tasdiqlanmagan! Super Admin tasdiqlashi kutilmoqda.", show_alert=True); return
     # ANTI-NAYRANG: o'z buyurtmasini o'zi ololmaydi (shaxsiy chatdan ham)
     if order.get("user_id") == q.from_user.id:
         await q.answer("⛔ O'z buyurtmangizni o'zingiz ololmaysiz! Bu nayrang hisoblanadi.", show_alert=True)
@@ -2337,6 +2425,9 @@ async def main():
     app.add_handler(CallbackQueryHandler(admin_action, pattern="^(accept|reject)_"))
     app.add_handler(CallbackQueryHandler(courier_toggle, pattern="^courier_toggle$"))
     app.add_handler(CallbackQueryHandler(register_courier, pattern="^register_courier$"))
+    app.add_handler(CallbackQueryHandler(admin_courier_approve, pattern="^admin_courier_approve_"))
+    app.add_handler(CallbackQueryHandler(admin_courier_reject, pattern="^admin_courier_reject_"))
+    app.add_handler(CallbackQueryHandler(courier_reupload_vehicle, pattern="^courier_reupload_vehicle$"))
     app.add_handler(CallbackQueryHandler(register_courier_transport, pattern="^courier_tr_"))
     app.add_handler(CallbackQueryHandler(client_balance_view, pattern="^client_balance$"))
     app.add_handler(CallbackQueryHandler(client_topup_ask, pattern="^client_topup$"))
