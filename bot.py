@@ -1328,6 +1328,10 @@ async def groc_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     _gs = [(k, r) for k, r in DB.get("groceries", {}).items() if r.get("active") and r.get("approved", True)]
     if not _gs:
+        _all = list(DB.get("groceries", {}).values())
+        _pending = [r for r in _all if not r.get("approved")]
+        if _pending:
+            await send_new_window(update, context, "🛒 *Oziq-ovqat do'konlari*\n\n⏳ Hozircha tasdiqlangan do'kon yo'q.\n\nQuyidagi do'konlar Super Admin tasdiqlashini kutyapti:\n" + "\n".join([f"• {r.get('name')} - ⏳ Kutilmoqda" for r in _pending]) + "\n\nSuper Admin tasdiqlaganda mijozlar ularni ko'radi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Do'kon ochish / Ro'yxatdan o'tish", callback_data="register_groc")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="client_order")]]), parse_mode="Markdown"); return
         await send_new_window(update, context, "🛒 *Oziq-ovqat do'konlari*\n\nHozircha do'kon yo'q.\n\nDo'koningiz bormi? Ro'yxatdan o'ting 👇", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Do'kon ochish / Ro'yxatdan o'tish", callback_data="register_groc")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="client_order")]]), parse_mode="Markdown"); return
     kb = [[InlineKeyboardButton(f"🛒 {r['name']}", callback_data=f"groc_{key}")] for key, r in _gs]
     kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="client_order")])
@@ -1547,7 +1551,7 @@ async def admin_groc_approve(update: Update, context: ContextTypes.DEFAULT_TYPE)
     q = update.callback_query; await q.answer()
     uid = int(q.data.replace("admin_groc_approve_", ""))
     for k, r in DB.get("groceries", {}).items():
-        if r.get("admin") == uid: r["approved"] = True; save(); break
+        if r.get("admin") == uid: r["approved"] = True; r["active"] = True; save(); break
     try: await context.bot.send_message(chat_id=uid, text="✅ *Do'koningiz tasdiqlandi!*\n\nEndi 🛒 Do'kon panelim dan mahsulotlaringizni qo'shishingiz mumkin.", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Do'kon panelim", callback_data="groc_panel")]]))
     except: pass
     await q.edit_message_text("✅ Oziq-ovqat do'koni tasdiqlandi!")
@@ -2523,12 +2527,20 @@ async def main():
     app.add_handler(CallbackQueryHandler(admin_money_info, pattern="^admin_money_info$"))
     app.add_handler(CallbackQueryHandler(admin_debt_report, pattern="^admin_debt_report$"))
     app.add_handler(CallbackQueryHandler(admin_rest_approve, pattern="^admin_rest_approve_"))
+    app.add_handler(CallbackQueryHandler(admin_groc_approve, pattern="^admin_groc_approve_"))
+    app.add_handler(CallbackQueryHandler(admin_groc_reject, pattern="^admin_groc_reject_"))
     app.add_handler(CallbackQueryHandler(admin_rest_reject, pattern="^admin_rest_reject_"))
     app.add_handler(CallbackQueryHandler(admin_rest_payouts, pattern="^admin_rest_payouts$"))
     app.add_handler(CallbackQueryHandler(admin_rest_pay_ask, pattern="^restpay_"))
     app.add_handler(CallbackQueryHandler(admin_rest_pay_ok, pattern="^restpayok_"))
     app.add_handler(CallbackQueryHandler(admin_topups_info, pattern="^admin_topups_info$"))
     app.add_handler(CallbackQueryHandler(generic_back, pattern="^(back_main|client_my|courier_my|courier_balance|admin_orders|rest_orders|admin_couriers|admin_users|admin_rests|admin_grocs|rest_menu|rest_stats)$"))
+    # CATCH-ALL: hech qaysi handlerga tushmagan tugma - jim turmasin, sababini aytsin
+    async def _unmatched_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        q = update.callback_query
+        try: await q.answer("⚠️ Bu tugma eski versiyada. Render da Deploy latest commit ni bosing.", show_alert=True)
+        except: pass
+    app.add_handler(CallbackQueryHandler(_unmatched_callback))
     app.add_handler(MessageHandler(filters.CONTACT, on_contact))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
@@ -2542,3 +2554,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
