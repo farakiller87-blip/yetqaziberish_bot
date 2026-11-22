@@ -24,6 +24,9 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SUPER_ADMIN = 6738827993
+# MIJOZ HISOBINI TO'LDIRISH UCHUN ADMIN KARTASI - shu yerga adminning Click/Payme kartasini yozing
+TOPUP_CARD = "8600 0000 0000 0000"  # <-- O'ZGARTIRING: admin kartasi
+TOPUP_CARD_OWNER = "Admin"
 COURIER_CHANNEL = -1003505074098
 DB_FILE = "db.json"
 
@@ -102,6 +105,8 @@ def main_kb(role, locked_role=None):
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🍔 Buyurtma berish", callback_data="client_order")],
             [InlineKeyboardButton("📦 Mening buyurtmalarim", callback_data="client_my")],
+            [InlineKeyboardButton("💰 Mening hisobim", callback_data="client_balance")],
+            [InlineKeyboardButton("➕ Hisobni to'ldirish", callback_data="client_topup")],
         ])
     if locked_role in ("courier", "restaurant"):
         # Bu funksiya noto'g'ri rol bilan chaqirilsa ham - boshqa rol tugmasi chiqmasin
@@ -112,6 +117,8 @@ def main_kb(role, locked_role=None):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🍔 Buyurtma berish", callback_data="client_order")],
         [InlineKeyboardButton("📦 Mening buyurtmalarim", callback_data="client_my")],
+        [InlineKeyboardButton("💰 Mening hisobim", callback_data="client_balance")],
+        [InlineKeyboardButton("➕ Hisobni to'ldirish", callback_data="client_topup")],
         [InlineKeyboardButton("🏪 Restoran sifatida ro'yxatdan o'tish", callback_data="register_rest")],
         [InlineKeyboardButton("🚴 Kuryer sifatida ro'yxatdan o'tish", callback_data="register_courier")],
     ])
@@ -808,6 +815,83 @@ async def finish_courier_reg_with_phone(update: Update, context: ContextTypes.DE
     except: pass
     return True
 
+
+# --- MIJOZ HISOBI (HAMYON) ---
+# Mijozda kuriernikiga o'xshash hisob bo'ladi: client_balance. Naqd tanlasa - pul shu hisobdan yechiladi.
+# Hisobni to'ldirish 2 yo'l bilan: A) Click/Payme orqali admin kartasiga + chek, B) Paynet ilovasi / Paynet terminali orqali admin kartasiga + chek. Ikkalasida ham mijoz adminga naqd bermaydi, faqat kartaga to'ldiradi.
+
+async def client_balance_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    uid = str(q.from_user.id)
+    u = DB["users"].get(uid, {})
+    bal = u.get("client_balance", 0)
+    await send_new_window(update, context, f"💰 *Mening hisobim*\n\n💳 Balans: {bal:,} so'm\n\nNaqd buyurtma bersangiz - pul shu hisobdan yechiladi.\nHisob bo'sh bo'lsa - avval to'ldiring.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ Hisobni to'ldirish", callback_data="client_topup")],
+            [InlineKeyboardButton("⬅️ Asosiy", callback_data="back_main")],
+        ]))
+
+async def client_topup_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    uid = str(q.from_user.id)
+    bal = DB["users"].get(uid, {}).get("client_balance", 0)
+    context.user_data["step"] = "client_topup_amount"
+    await send_new_window(update, context, f"➕ *Hisobni to'ldirish*\n\n💳 Hozirgi balans: {bal:,} so'm\n\nQancha to'ldirmoqchisiz? Summani yozing (faqat raqam):\nMasalan: 50000",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="back_main")]]))
+
+async def handle_client_topup_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    step = context.user_data.get("step")
+    if step != "client_topup_amount":
+        return False
+    text = (update.message.text or "").strip().replace(" ", "").replace(",", "")
+    if not text.isdigit() or int(text) < 1000:
+        await send_new_window(update, context, "❌ Kamida 1 000 so'm bo'lishi kerak. Qaytadan yozing:\nMasalan: 50000")
+        return True
+    context.user_data["topup_amount"] = int(text)
+    context.user_data["step"] = None
+    await send_new_window(update, context, f"💰 Summa: {int(text):,} so'm\n\nQaysi yo'l bilan to'ldirasiz?",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("💳 Click / Payme orqali", callback_data="client_topup_card")],
+            [InlineKeyboardButton("🟢 Paynet orqali (ilova / terminal)", callback_data="client_topup_paynet")],
+            [InlineKeyboardButton("❌ Bekor qilish", callback_data="back_main")],
+        ]))
+    return True
+
+async def client_topup_method(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    uid = str(q.from_user.id)
+    amt = context.user_data.get("topup_amount", 0)
+    if not amt:
+        await send_new_window(update, context, "Avval summani yozing.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("➕ Hisobni to'ldirish", callback_data="client_topup")]]))
+        return
+    u = DB["users"].get(uid, {})
+    if q.data == "client_topup_card":
+        context.user_data["step"] = f"topup_proof_{amt}"
+        await send_new_window(update, context, f"💳 *Click / Payme orqali to'ldirish*\n\n💰 Summa: {amt:,} so'm\n💳 Admin kartasi: `{TOPUP_CARD}`\n👤 Egasi: {TOPUP_CARD_OWNER}\n\n1️⃣ Shu kartaga {amt:,} so'm o'tkazing\n2️⃣ Chekni shu yerga rasm qilib yuboring 📸\n\nChek kelgach admin tekshirib hisobingizni to'ldiradi.")
+    elif q.data == "client_topup_paynet":
+        # B) PAYNET: mijoz adminga naqd bermaydi - admin kartasini Paynet ilova / Paynet terminal orqali to'ldiradi, chekini yuboradi
+        context.user_data["step"] = f"topup_proof_{amt}"
+        await send_new_window(update, context, f"🟢 *Paynet orqali to'ldirish*\n\n💰 Summa: {amt:,} so'm\n💳 Admin kartasi: `{TOPUP_CARD}`\n👤 Egasi: {TOPUP_CARD_OWNER}\n\nQanday to'ldirasiz - o'zingiz tanlang:\n\n1️⃣ *Paynet ilovasi* orqali:\nPaynet ni oching → Karta to'ldirish → shu karta raqamini yozing → {amt:,} so'm yuboring\n\n2️⃣ *Paynet terminali* orqali:\nEng yaqin Paynet terminaliga boring → Karta to'ldirish → shu karta raqamini yozing → {amt:,} so'm naqdni terminalga soling\n\n3️⃣ Chekni shu yerga rasm qilib yuboring 📸\n\nChek kelgach admin tekshirib hisobingizni to'ldiradi.")
+
+async def client_topup_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    # topupok_uid_amt yoki topupno_uid_amt - topupok da uid da _ yo'q, amt raqam
+    data = q.data.replace("topupok_", "").replace("topupno_", "")
+    # oxirgi _ dan keyin amt
+    uid, amt = data.rsplit("_", 1)
+    amt = int(amt)
+    u = DB["users"].get(str(uid), {})
+    if q.data.startswith("topupok_"):
+        u["client_balance"] = u.get("client_balance", 0) + amt; save()
+        await send_new_window(update, context, f"✅ Hisob to'ldirildi!\n👤 {u.get('name')} | {amt:,} so'm\n💳 Yangi balans: {u.get('client_balance',0):,} so'm")
+        try: await context.bot.send_message(chat_id=int(uid), text=f"✅ Hisobingiz to'ldirildi!\n\n💰 +{amt:,} so'm\n💳 Balans: {u.get('client_balance',0):,} so'm\n\nEndi Naqd buyurtma berishingiz mumkin.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🍔 Buyurtma berish", callback_data="client_order")], [InlineKeyboardButton("💰 Mening hisobim", callback_data="client_balance")]]))
+        except: pass
+    else:
+        await send_new_window(update, context, f"❌ To'ldirish so'rovi rad etildi. Mijoz: {u.get('name')} | {amt:,} so'm")
+        try: await context.bot.send_message(chat_id=int(uid), text=f"❌ Hisobni to'ldirish so'rovingiz rad etildi.\nSumma: {amt:,} so'm\nAdmin bilan bog'laning.")
+        except: pass
+
 # --- MIJOZ ---
 async def client_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -916,6 +1000,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if await handle_courier_reg_text(update, context):
         return
+    if await handle_client_topup_text(update, context):
+        return
     if context.user_data.get("step") != "address":
          await show_main(update, update.effective_user.id, "🏠 Asosiy menyu:")
          return
@@ -932,6 +1018,21 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _del = DB["restaurants"][cafe_key].get("delivery", 15000)
     if _sub >= 100000: _del = 0
     total = _sub + _del
+    # NAQD = HISOBDAN: mijoz Naqd tanlagan bo'lsa - pul avval hisobdan yechiladi, hisobda yetmasa buyurtma ketmaydi
+    _pay_tmp = context.user_data.get("payment", "Naqd 💵")
+    if _pay_tmp == "Naqd 💵":
+        _uid_tmp = str(update.effective_user.id)
+        _bal_tmp = DB["users"].get(_uid_tmp, {}).get("client_balance", 0)
+        if _bal_tmp < total:
+            context.user_data["step"] = None
+            await send_new_window(update, context, f"⛔ Hisobingizda pul yetmaydi!\n\n💰 Kerak: {total:,} so'm\n💳 Hisobingizda: {_bal_tmp:,} so'm\n❌ Yetmayapti: {total - _bal_tmp:,} so'm\n\nAvval hisobingizni to'ldiring, keyin buyurtma bering.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("➕ Hisobni to'ldirish", callback_data="client_topup")],
+                    [InlineKeyboardButton("💰 Mening hisobim", callback_data="client_balance")],
+                    [InlineKeyboardButton("⬅️ Asosiy", callback_data="back_main")],
+                ]))
+            return
+        DB["users"][_uid_tmp]["client_balance"] = _bal_tmp - total; save()
     context.user_data["delivery_fee"] = _del
     oid = DB["counter"]; DB["counter"] += 1
     uid = str(update.effective_user.id)
@@ -945,7 +1046,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     r = DB["restaurants"][cafe_key]
     text = f"🔥 YANGI BUYURTMA #{oid}!\n\n🏪 {r['name']}\n👤 {DB['users'][uid]['name']} | 📞 {DB['users'][uid].get('phone')}\n📍 {address}\n"
     for n, p in cart: text += f"🛒 {n} - {p}\n"
-    text += f"\n🚗 Yetkazib berish: {context.user_data.get(chr(100)+chr(101)+chr(108)+chr(105)+chr(118)+chr(101)+chr(114)+chr(121)+chr(95)+chr(102)+chr(101)+chr(101), 0)} \n💰 JAMI: {total} so'm | {payment}"
+    _pay_note = " | 💳 Hisobdan yechildi" if payment == "Naqd 💵" else ""
+    text += f"\n🚗 Yetkazib berish: {context.user_data.get(chr(100)+chr(101)+chr(108)+chr(105)+chr(118)+chr(101)+chr(114)+chr(121)+chr(95)+chr(102)+chr(101)+chr(101), 0)} \n💰 JAMI: {total} so'm | {payment}{_pay_note}"
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ QABUL QILISH", callback_data=f"accept_{oid}"), InlineKeyboardButton("❌ RAD ETISH", callback_data=f"reject_{oid}")]])
     await context.bot.send_message(chat_id=r["admin"], text=text, reply_markup=kb)
     await context.bot.send_message(chat_id=SUPER_ADMIN, text=text)
@@ -961,12 +1063,28 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _m2 = await context.bot.send_message(chat_id=update.effective_chat.id, text=f"✅ Buyurtmangiz yuborildi!\n\n💳 *{payment} bilan to'lang:*\nKarta: `{card}`\nSumma: {total:,} so'm\n\nTo'lovni qilib bo'lgach, *chekni shu yerga rasm qilib yuboring* 📸\nChek kelmaguncha restoran buyurtmani qabul qilmaydi.",
             parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
     else:
-        _m2 = await context.bot.send_message(chat_id=update.effective_chat.id, text="✅ Buyurtmangiz yuborildi! Restoran tasdiqlashi kutilmoqda...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
+        _m2 = await context.bot.send_message(chat_id=update.effective_chat.id, text=f"✅ Buyurtmangiz yuborildi! Restoran tasdiqlashi kutilmoqda...\n\n💳 Hisobingizdan {total:,} so'm yechildi.\n💰 Qolgan balans: {DB['users'].get(str(update.effective_user.id), {}).get('client_balance', 0):,} so'm", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
 
 
 # --- CHEK RASMINI QABUL QILISH ---
 async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     step = context.user_data.get("step", "")
+    # MIJOZ HISOBINI TO'LDIRISH CHEKI
+    if str(step).startswith("topup_proof_"):
+        amt = int(str(step).replace("topup_proof_", ""))
+        uid = str(update.effective_user.id)
+        u = DB["users"].get(uid, {})
+        context.user_data["step"] = None
+        photo_id = update.message.photo[-1].file_id
+        caption = f"🧾 *HISOBNI TO'LDIRISH CHEKI*\n\n👤 Mijoz: {u.get('name')} | ID: {uid}\n📞 {u.get('phone','-')}\n💰 Summa: {amt:,} so'm\n💳 Karta: {TOPUP_CARD}\n\nChekni tekshirib tasdiqlang."
+        kb2 = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Tasdiqlash - Hisobni to'ldirish", callback_data=f"topupok_{uid}_{amt}"), InlineKeyboardButton("❌ Rad etish", callback_data=f"topupno_{uid}_{amt}")]])
+        try: await context.bot.send_photo(chat_id=SUPER_ADMIN, photo=photo_id, caption=caption, parse_mode="Markdown", reply_markup=kb2)
+        except: pass
+        try: await update.message.delete()
+        except: pass
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"✅ Chekingiz adminga yuborildi!\n\n💰 {amt:,} so'm\nAdmin tekshirib hisobingizni to'ldiradi.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💰 Mening hisobim", callback_data="client_balance")], [InlineKeyboardButton("⬅️ Asosiy", callback_data="back_main")]]))
+        return
     if not step or not str(step).startswith("pay_proof_"):
         # Boshqa rasm bo'lsa e'tibor bermaymiz
         return
@@ -1298,6 +1416,10 @@ async def main():
     app.add_handler(CallbackQueryHandler(courier_toggle, pattern="^courier_toggle$"))
     app.add_handler(CallbackQueryHandler(register_courier, pattern="^register_courier$"))
     app.add_handler(CallbackQueryHandler(register_courier_transport, pattern="^courier_tr_"))
+    app.add_handler(CallbackQueryHandler(client_balance_view, pattern="^client_balance$"))
+    app.add_handler(CallbackQueryHandler(client_topup_ask, pattern="^client_topup$"))
+    app.add_handler(CallbackQueryHandler(client_topup_method, pattern="^client_topup_(card|paynet)$"))
+    app.add_handler(CallbackQueryHandler(client_topup_approve, pattern="^topup(ok|no)_"))
     app.add_handler(CallbackQueryHandler(courier_panel, pattern="^courier_panel$"))
     app.add_handler(CallbackQueryHandler(courier_balance_new, pattern="^courier_balance_new$"))
     app.add_handler(CallbackQueryHandler(courier_withdraw, pattern="^courier_withdraw$"))
