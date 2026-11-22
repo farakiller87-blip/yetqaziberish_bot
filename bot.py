@@ -158,6 +158,15 @@ async def change_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]))
 
 
+
+async def rest_card_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    key, r = _my_rest(q.from_user.id)
+    if not r: return
+    context.user_data["step"] = "rest_card_val"
+    await q.edit_message_text(f"💳 Hozirgi kartangiz: {r.get('payme_card','belgilanmagan')}\n\nYangi karta raqamini yozing:\nMasalan: 8600123456789012",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor qilish", callback_data="rest_panel")]]))
+
 # --- RESTORAN O'ZI RO'YXATDAN O'TISHI ---
 async def register_rest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -278,6 +287,7 @@ async def rest_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("💰 Narxni o'zgartirish", callback_data="rest_price_list")],
         [InlineKeyboardButton("❌ Tugadi / Bor qilish", callback_data="rest_menu")],
         [InlineKeyboardButton("🚚 Yetkazish narxini o'zgartirish", callback_data="rest_delivery")],
+        [InlineKeyboardButton("💳 Payme / Click karta raqamim", callback_data="rest_card")],
         [InlineKeyboardButton("🟢 Ochiq / 🔴 Yopiq", callback_data="rest_open")],
         [InlineKeyboardButton("📊 Bugungi statistika", callback_data="rest_stats_new")],
         [InlineKeyboardButton("⬅️ Asosiy", callback_data="back_main")],
@@ -398,6 +408,16 @@ async def handle_rest_panel_text(update: Update, context: ContextTypes.DEFAULT_T
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏪 Panelga qaytish", callback_data="rest_panel")]]))
         else:
             await update.message.reply_text("Taom topilmadi."); context.user_data["step"]=None
+        return True
+    if step == "rest_card_val":
+        card = text.replace(" ", "")
+        if len(card) < 16 or not card.isdigit():
+            await update.message.reply_text("❌ Karta 16 ta raqam bo'lishi kerak. Qaytadan yozing:"); return True
+        # Chiroyli ko'rinishda saqlaymiz: 8600 1234 5678 9012
+        pretty = " ".join([card[i:i+4] for i in range(0, len(card), 4)])
+        r["payme_card"] = pretty; save(); context.user_data["step"]=None
+        await update.message.reply_text(f"✅ Kartangiz saqlandi: {pretty}\nEndi mijozlarga shu karta chiqadi.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏪 Panelga qaytish", callback_data="rest_panel")]]))
         return True
     if step == "rest_delivery_val":
         try: d=int(text.replace(" ","").replace("so'm",""))
@@ -596,7 +616,7 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["step"] = "address"
     await q.message.reply_text("📍 Manzilingizni yozing (Masalan: Yashil Bozor, 5-uy):", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📍 Lokatsiya yuborish", request_location=True)]], resize_keyboard=True, one_time_keyboard=True))
 async def on_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message.contact:
+    if not update.message.contact: 
         return
     uid = str(update.effective_user.id)
     DB["users"][uid]["phone"] = update.message.contact.phone_number; save()
@@ -644,7 +664,48 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ QABUL QILISH", callback_data=f"accept_{oid}"), InlineKeyboardButton("❌ RAD ETISH", callback_data=f"reject_{oid}")]])
     await context.bot.send_message(chat_id=r["admin"], text=text, reply_markup=kb)
     await context.bot.send_message(chat_id=SUPER_ADMIN, text=text)
-    await update.message.reply_text("✅ Buyurtmangiz yuborildi! Restoran tasdiqlashi kutilmoqda...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
+    # --- TO'LOV TASDIQI: Naqd bo'lmasa chek so'raymiz ---
+    if payment in ("Payme 💳", "Click 💳"):
+        # Restoranga avval "to'lov kutilmoqda" deb yozamiz - asl xabar yuqorida ketdi, endi qo'shimcha ogohlantirish
+        try: await context.bot.send_message(chat_id=r["admin"], text=f"⏳ Buyurtma #{oid} - TO'LOV KUTILMOQDA\n{payment} tanlandi. Mijoz hozir chek yuboradi, chek kelgach QABUL QILISH ni bosing.")
+        except: pass
+        context.user_data["step"] = f"pay_proof_{oid}"
+        context.user_data["pending_oid"] = oid
+        # Karta raqamini ko'rsatamiz - egasi o'z kartasini keyin paneldan o'zgartira oladi
+        card = r.get("payme_card", "8600 **** **** ****")
+        await update.message.reply_text(f"✅ Buyurtmangiz yuborildi!\n\n💳 *{payment} bilan to'lang:*\nKarta: `{card}`\nSumma: {total:,} so'm\n\nTo'lovni qilib bo'lgach, *chekni shu yerga rasm qilib yuboring* 📸\nChek kelmaguncha restoran buyurtmani qabul qilmaydi.",
+            parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
+    else:
+        await update.message.reply_text("✅ Buyurtmangiz yuborildi! Restoran tasdiqlashi kutilmoqda...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
+
+
+# --- CHEK RASMINI QABUL QILISH ---
+async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    step = context.user_data.get("step", "")
+    if not step or not str(step).startswith("pay_proof_"):
+        # Boshqa rasm bo'lsa e'tibor bermaymiz
+        return
+    oid = str(step.replace("pay_proof_", ""))
+    order = DB["orders"].get(oid)
+    if not order:
+        await update.message.reply_text("❌ Buyurtma topilmadi.")
+        context.user_data["step"] = None
+        return
+    order["payment_proof"] = True
+    order["payment_status"] = "chek_keldi"
+    save()
+    context.user_data["step"] = None
+    r = DB["restaurants"].get(order["cafe"], {})
+    # Chek rasmini restoranga + adminga yuboramiz
+    caption = f"🧾 *TO'LOV CHEKI KELDI!*\n\nBuyurtma #{oid}\n🏪 {r.get('name','')}\n👤 {order.get('name')} | 📞 {order.get('phone')}\n💰 {order.get('total',0):,} so'm | {order.get('payment')}\n\nChekni tekshirib, QABUL QILISH ni bosing."
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ QABUL QILISH", callback_data=f"accept_{oid}"), InlineKeyboardButton("❌ RAD ETISH", callback_data=f"reject_{oid}")]])
+    photo_id = update.message.photo[-1].file_id
+    try: await context.bot.send_photo(chat_id=r.get("admin"), photo=photo_id, caption=caption, parse_mode="Markdown", reply_markup=kb)
+    except Exception as e: print("Chek restoranga yuborilmadi:", e)
+    try: await context.bot.send_photo(chat_id=SUPER_ADMIN, photo=photo_id, caption=caption, parse_mode="Markdown")
+    except: pass
+    await update.message.reply_text(f"✅ Chekingiz yuborildi!\nRestoran chekni tekshirib, buyurtmangizni tasdiqlaydi.\nBuyurtma #{oid}",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
 
 # --- RESTORAN ---
 async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -814,6 +875,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(rest_delivery_ask, pattern="^rest_delivery$"))
     app.add_handler(CallbackQueryHandler(rest_open_toggle, pattern="^rest_open$"))
     app.add_handler(CallbackQueryHandler(rest_stats_new, pattern="^rest_stats_new$"))
+    app.add_handler(CallbackQueryHandler(rest_card_ask, pattern="^rest_card$"))
     app.add_handler(CallbackQueryHandler(add_item, pattern="^add_"))
     app.add_handler(CallbackQueryHandler(confirm_cart, pattern="^confirm_cart$"))
     app.add_handler(CallbackQueryHandler(pay_select, pattern="^pay_"))
@@ -835,6 +897,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(admin_stats, pattern="^admin_stats$"))
     app.add_handler(CallbackQueryHandler(generic_back, pattern="^(back_main|client_my|courier_my|courier_balance|admin_orders|rest_orders|admin_couriers|admin_users|admin_rests|rest_menu|rest_stats)$"))
     app.add_handler(MessageHandler(filters.CONTACT, on_contact))
+    app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     app.add_handler(MessageHandler(filters.LOCATION, on_location))
     print("Yandex-style bot ishga tushdi...")
@@ -846,4 +909,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
