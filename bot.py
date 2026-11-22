@@ -100,15 +100,47 @@ def main_kb(role):
         [InlineKeyboardButton("🚴 Kuryer sifatida ro'yxatdan o'tish", callback_data="register_courier")],
     ])
 
+async def send_new_window(update, context, text, reply_markup=None):
+    """YANGI OYNA: eski panel xabarini o'chirib, bitta yangi xabar yuboradi.
+    Mijoz panelida oldingi operatsiyalar ko'rinmasligi uchun."""
+    # Eski bot xabarini o'chirishga urinamiz
+    old_id = context.user_data.get("panel_msg_id") if context else None
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if old_id and chat_id:
+        try: await context.bot.delete_message(chat_id=chat_id, message_id=old_id)
+        except: pass
+    # Yangi xabar
+    try:
+        if update.callback_query:
+            # Callback bo'lsa - eski xabarni o'chirib yangisini yuboramiz (edit emas, toza oyna)
+            try: await update.callback_query.message.delete()
+            except: pass
+            m = await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+        else:
+            m = await update.message.reply_text(text, reply_markup=reply_markup)
+        if context is not None:
+            context.user_data["panel_msg_id"] = m.message_id
+        return m
+    except Exception:
+        return None
+
 async def show_main(update, user_id, text="Asosiy menyu:"):
     u = DB["users"].get(str(user_id), {})
     role = u.get("role", "client")
     kb = main_kb(role)
-    if update.callback_query:
-        try: await update.callback_query.edit_message_text(text, reply_markup=kb)
-        except: await update.callback_query.message.reply_text(text, reply_markup=kb)
-    else:
-        await update.message.reply_text(text, reply_markup=kb)
+    # YANGI OYNA: mijozda eski panelni o'chirib yangisini chiqaramiz
+    try:
+        ctx = None
+        # context ni update dan olishga urinamiz - callback bo'lsa ham, message bo'lsa ham
+        # show_main ga context kelmaydi, shuning uchun to'g'ridan-to'g'ri edit/delete qilamiz
+        if update.callback_query:
+            try: await update.callback_query.message.delete()
+            except: pass
+            await update.callback_query.message.reply_text(text, reply_markup=kb)
+        else:
+            await update.message.reply_text(text, reply_markup=kb)
+    except Exception:
+        pass
 
 # --- START / ROL TANLASH ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -622,7 +654,9 @@ async def client_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     kb = [[InlineKeyboardButton(r["name"], callback_data=f"cafe_{key}")] for key, r in DB["restaurants"].items() if r.get("active")]
     kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")])
-    await q.edit_message_text("Qaysi restorandan buyurtma berasiz?", reply_markup=InlineKeyboardMarkup(kb))
+    try: await q.message.delete()
+    except: pass
+    await context.bot.send_message(chat_id=q.from_user.id, text="Qaysi restorandan buyurtma berasiz?", reply_markup=InlineKeyboardMarkup(kb))
 
 async def cafe_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -640,7 +674,9 @@ async def cafe_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb.append([InlineKeyboardButton("✅ Savatni tasdiqlash", callback_data="confirm_cart")])
     kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="client_order")])
     _del = r.get("delivery", 15000)
-    await q.edit_message_text(f"🏪 {r['name']}\n⏱ Yetkazish: {_del:,} so\'m (100 000 dan yuqoriga BEPUL)\nMenyu:", reply_markup=InlineKeyboardMarkup(kb))
+    try: await q.message.delete()
+    except: pass
+    await context.bot.send_message(chat_id=q.from_user.id, text=f"🏪 {r['name']}\n⏱ Yetkazish: {_del:,} so\'m (100 000 dan yuqoriga BEPUL)\nMenyu:", reply_markup=InlineKeyboardMarkup(kb))
 
 async def add_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -654,9 +690,10 @@ async def confirm_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cart = context.user_data.get("cart", [])
     if not cart: await q.answer("Savat bo'sh!"); return
     context.user_data["step"] = "phone"
-    await q.edit_message_text("📞 Telefon raqamingizni yuboring:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📞 Raqamni yuborish", callback_data="send_phone_btn")]]))
-    # Telefonni contact orqali olish uchun Reply tugma
-    await q.message.reply_text("Pastdagi tugmani bosib raqamingizni yuboring 👇", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📞 Raqamni yuborish", request_contact=True)]], resize_keyboard=True, one_time_keyboard=True))
+    # YANGI OYNA: eski panelni o'chirib, faqat bitta yangi oyna qoldiramiz
+    try: await q.message.delete()
+    except: pass
+    await context.bot.send_message(chat_id=q.from_user.id, text="📞 Telefon raqamingizni yuboring 👇\n\nPastdagi tugmani bosing:", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📞 Raqamni yuborish", request_contact=True)]], resize_keyboard=True, one_time_keyboard=True))
 async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     if q.data == "pay_naqd":
@@ -666,7 +703,11 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         context.user_data["payment"] = "Click 💳"
     context.user_data["step"] = "address"
-    await q.message.reply_text("📍 Manzilingizni yozing (Masalan: Yashil Bozor, 5-uy):", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📍 Lokatsiya yuborish", request_location=True)]], resize_keyboard=True, one_time_keyboard=True))
+    # YANGI OYNA: eski to'lov oynasini o'chirib, faqat manzil oynasi qoladi
+    try: await q.message.delete()
+    except: pass
+    _m = await context.bot.send_message(chat_id=q.from_user.id, text="📍 Manzilingizni yozing (Masalan: Yashil Bozor, 5-uy):", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📍 Lokatsiya yuborish", request_location=True)]], resize_keyboard=True, one_time_keyboard=True))
+    context.user_data["panel_msg_id"] = _m.message_id
 async def on_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.contact:
         return
@@ -684,11 +725,13 @@ async def on_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if step == "phone":
         if not context.user_data.get("cart"):
             context.user_data["step"] = None
-            await update.message.reply_text("✅ Raqamingiz qabul qilindi! Endi buyurtma berishingiz mumkin.", reply_markup=ReplyKeyboardRemove())
-            await show_main(update, update.effective_user.id, "🍔 Buyurtma berish uchun restoranni tanlang:")
+            await show_main(update, update.effective_user.id, "✅ Raqamingiz qabul qilindi! Endi buyurtma berishingiz mumkin.\n\n🍔 Buyurtma berish uchun restoranni tanlang:")
             return
         context.user_data["step"] = "payment"
-        await update.message.reply_text("✅ Raqamingiz qabul qilindi!\n\n💳 To'lov turini tanlang:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💵 Naqd", callback_data="pay_naqd"), InlineKeyboardButton("💳 Click", callback_data="pay_click"), InlineKeyboardButton("💳 Payme", callback_data="pay_payme")]]))
+        # YANGI OYNA: eski raqam oynasini o'chirib, faqat to'lov oynasi qoladi
+        try: await update.message.delete()
+        except: pass
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="✅ Raqamingiz qabul qilindi!\n\n💳 To'lov turini tanlang:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💵 Naqd", callback_data="pay_naqd"), InlineKeyboardButton("💳 Click", callback_data="pay_click"), InlineKeyboardButton("💳 Payme", callback_data="pay_payme")]]))
         return
     if step == "courier_phone":
         context.user_data["step"] = None
@@ -696,8 +739,7 @@ async def on_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_main(update, update.effective_user.id)
         return
     context.user_data["step"] = None
-    await update.message.reply_text("✅ Raqamingiz qabul qilindi! Endi buyurtma berishingiz mumkin.", reply_markup=ReplyKeyboardRemove())
-    await show_main(update, update.effective_user.id, "🍔 Buyurtma berish uchun restoranni tanlang:")
+    await show_main(update, update.effective_user.id, "✅ Raqamingiz qabul qilindi! Endi buyurtma berishingiz mumkin.\n\n🍔 Buyurtma berish uchun restoranni tanlang:")
 
 async def send_phone_btn_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -714,6 +756,13 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
          await show_main(update, update.effective_user.id, "🏠 Asosiy menyu:")
          return
     address = update.message.text
+    # YANGI OYNA: eski manzil oynasini o'chirib, faqat bitta "Buyurtma yuborildi" oynasi qoladi
+    _old = context.user_data.get("panel_msg_id")
+    if _old:
+        try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=_old)
+        except: pass
+    try: await update.message.delete()
+    except: pass
     cart = context.user_data.get("cart", []); cafe_key = context.user_data.get("cafe")
     _sub = sum(p for _, p in cart)
     _del = DB["restaurants"][cafe_key].get("delivery", 15000)
@@ -742,10 +791,10 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["pending_oid"] = oid
         # Karta raqamini ko'rsatamiz - egasi o'z kartasini keyin paneldan o'zgartira oladi
         card = r.get("payme_card", "8600 **** **** ****")
-        await update.message.reply_text(f"✅ Buyurtmangiz yuborildi!\n\n💳 *{payment} bilan to'lang:*\nKarta: `{card}`\nSumma: {total:,} so'm\n\nTo'lovni qilib bo'lgach, *chekni shu yerga rasm qilib yuboring* 📸\nChek kelmaguncha restoran buyurtmani qabul qilmaydi.",
+        _m2 = await context.bot.send_message(chat_id=update.effective_chat.id, text=f"✅ Buyurtmangiz yuborildi!\n\n💳 *{payment} bilan to'lang:*\nKarta: `{card}`\nSumma: {total:,} so'm\n\nTo'lovni qilib bo'lgach, *chekni shu yerga rasm qilib yuboring* 📸\nChek kelmaguncha restoran buyurtmani qabul qilmaydi.",
             parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
     else:
-        await update.message.reply_text("✅ Buyurtmangiz yuborildi! Restoran tasdiqlashi kutilmoqda...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
+        _m2 = await context.bot.send_message(chat_id=update.effective_chat.id, text="✅ Buyurtmangiz yuborildi! Restoran tasdiqlashi kutilmoqda...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
 
 
 # --- CHEK RASMINI QABUL QILISH ---
@@ -773,7 +822,12 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e: print("Chek restoranga yuborilmadi:", e)
     try: await context.bot.send_photo(chat_id=SUPER_ADMIN, photo=photo_id, caption=caption, parse_mode="Markdown")
     except: pass
-    await update.message.reply_text(f"✅ Chekingiz yuborildi!\nRestoran chekni tekshirib, buyurtmangizni tasdiqlaydi.\nBuyurtma #{oid}",
+    # YANGI OYNA: eski "karta" oynasini o'chirib, faqat bitta oyna qoladi
+    try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=context.user_data.get("panel_msg_id"))
+    except: pass
+    try: await update.message.delete()
+    except: pass
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=f"✅ Chekingiz yuborildi!\nRestoran chekni tekshirib, buyurtmangizni tasdiqlaydi.\nBuyurtma #{oid}",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy", callback_data="back_main")]]))
 
 # --- RESTORAN ---
