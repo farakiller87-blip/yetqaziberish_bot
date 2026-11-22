@@ -900,8 +900,12 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=order["user_id"], text="✅ Buyurtmangiz tasdiqlandi! Kuryer qidirilmoqda...")
     # Kanalga + online kuryerlarga
     ctext = f"🚨 YANGI BUYURTMA #{oid}!\n\n🏪 {r['name']}\n📍 {order['address']}\n👤 {order['name']} | 📞 {order['phone']}\n💰 {order['total']} so'm\n\nKim birinchi olsa - oshaniki!"
-    ckb = InlineKeyboardMarkup([[InlineKeyboardButton("🏃 MEN OLAMAN", callback_data=f"take_{oid}")]])
-    try: await context.bot.send_message(chat_id=COURIER_CHANNEL, text=ctext, reply_markup=ckb)
+    # KANAL QOLDI - kuryer yangi buyurtmani shu kanaldan ko'radi va shu yerdan oladi.
+    # Kanal postiga "MEN OLAMAN" tugmasi qaytarildi - lekin endi u qotmaydi (pastda courier_take da kanaldan bosish alohida ishlanadi).
+    ckb2 = InlineKeyboardMarkup([[InlineKeyboardButton("🏃 MEN OLAMAN", callback_data=f"take_{oid}")]])
+    try:
+        _cm = await context.bot.send_message(chat_id=COURIER_CHANNEL, text=ctext, reply_markup=ckb2)
+        order["channel_msg_id"] = _cm.message_id; save()
     except Exception as e: print("Kanal xato:", e)
     for uid, u in DB["users"].items():
         if u.get("role") == "courier" and u.get("online"):
@@ -933,11 +937,44 @@ async def courier_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
+    # TUZATILDI: kanaldan bosilsa - qotib qolmasin, botga yo'naltiramiz
+    try:
+        _chat_type = q.message.chat.type if q.message and q.message.chat else "private"
+    except: _chat_type = "private"
+    if _chat_type == "channel":
+        # KANALDAN OLISH - shu yerda ishlaydi! Kanal xabarini o'chirmaymiz, faqat yangilaymiz.
+        if not order or order["status"] != "to_courier":
+            await q.answer("Bu buyurtma allaqachon olingan!", show_alert=True); return
+        if str(q.from_user.id) not in DB["users"]:
+            await q.answer("Avval botda /start bosib kuryer sifatida ro'yxatdan o'ting!", show_alert=True); return
+        order["status"] = "taken"; order["courier_id"] = q.from_user.id; order["courier_name"] = q.from_user.first_name; save()
+        _u2 = DB["users"][str(q.from_user.id)]
+        # 1) Kanaldagi postni "OLINDI" ga almashtiramiz - tugma yo'qoladi, boshqa kuryer bosolmaydi
+        try: await context.bot.edit_message_text(chat_id=COURIER_CHANNEL, message_id=q.message.message_id, text=f"✅ BUYURTMA #{oid} OLINDI!\n\n🚴 Kuryer: {q.from_user.first_name}\n🏪 {DB['restaurants'][order['cafe']]['name']}\n💰 {order['total']} so'm")
+        except: pass
+        # 2) Kuryerga SHAXSIY chatga tafsilot + YETKAZDIM tugmasini yuboramiz - keyingi ish shu yerda davom etadi
+        try: await context.bot.send_message(chat_id=q.from_user.id, text=f"✅ Buyurtma #{oid} seniki! (kanaldan olding)\n\n📍 Manzil: {order['address']}\n📞 Mijoz: {order['phone']}\n💰 {order['total']} so'm\n\nYetkazib bo'lgach pastni bos:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ YETKAZDIM", callback_data=f"done_{oid}")]]))
+        except: pass
+        # 3) Mijoz + restoranga xabar
+        try: await context.bot.send_message(chat_id=order["user_id"], text=f"🚴 Kuryer {_u2.get('name', q.from_user.first_name)} yo'lga chiqdi! Buyurtma #{oid} yo'lda.")
+        except: pass
+        try: await context.bot.send_message(chat_id=DB["restaurants"][order["cafe"]]["admin"], text=f"🚴 Kuryer {_u2.get('name', q.from_user.first_name)} buyurtma #{oid} ni oldi (kanaldan).")
+        except: pass
+        await q.answer("✅ Buyurtma seniki! Botga kir - tafsilot shaxsiy chatda.", show_alert=True)
+        return
     oid = str(q.data.split("_")[1])
     order = DB["orders"].get(oid)
     if not order or order["status"] != "to_courier":
-        await q.answer("Bu buyurtma allaqachon olingan!"); return
+        await q.answer("Bu buyurtma allaqachon olingan!", show_alert=True); return
+    # TUZATILDI: foydalanuvchi DB da bo'lmasa - KeyError bilan yiqilmasin
+    if str(q.from_user.id) not in DB["users"]:
+        await q.answer("Avval botda /start bosib kuryer sifatida ro'yxatdan o'ting!", show_alert=True); return
     order["status"] = "taken"; order["courier_id"] = q.from_user.id; order["courier_name"] = q.from_user.first_name; save()
+    # Kanaldagi e'lonni "OLINDI" deb yangilaymiz - boshqa kuryerlar bosib qotib qolmasin
+    _ch_mid = order.get("channel_msg_id")
+    if _ch_mid:
+        try: await context.bot.edit_message_text(chat_id=COURIER_CHANNEL, message_id=_ch_mid, text=f"✅ BUYURTMA #{oid} OLINDI!\n\n🚴 Kuryer: {q.from_user.first_name}\n\nYangi buyurtma kelsa shu yerda chiqadi.")
+        except: pass
     u = DB["users"][str(q.from_user.id)]
     await courier_new(q, context, f"✅ Buyurtma #{oid} seniki!\n\n📍 Manzil: {order['address']}\n📞 Mijoz: {order['phone']}\n💰 {order['total']} so'm\n\nYetkazib bo'lgach pastni bos:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ YETKAZDIM", callback_data=f"done_{oid}")]]))
     await context.bot.send_message(chat_id=order["user_id"], text=f"🚴 Kuryer {u['name']} yo'lga chiqdi! Buyurtma #{oid} yo'lda.")
