@@ -1041,6 +1041,22 @@ def _fee_by_km(km):
     if km <= 20: return 30000
     return 30000 + int((km-20)*1000)  # 20 km dan keyin har 1 km ga +1000
 
+def _fee_by_transport(base_fee, transport: str) -> int:
+    tr = (transport or "").lower()
+    if "mashina" in tr or "car" in tr or "avto" in tr: mult = 1.5  # Benzin + gaz + mashina xarajati
+    elif "velosiped" in tr or "bike" in tr or "velo" in tr: mult = 0.8  # Benzin yo'q - arzonroq
+    elif "piyoda" in tr or "walk" in tr: mult = 0.6  # Eng arzon - faqat mehnat haqi
+    else: mult = 1.0  # Moped / Skuter - standart
+    # 500 ga yaxlitlaymiz - mayda pul bo'lmasin
+    return int(round(int(base_fee) * mult / 500) * 500)
+
+def _transport_emoji(transport: str) -> str:
+    tr = (transport or "").lower()
+    if "mashina" in tr or "car" in tr: return "🚗"
+    if "velosiped" in tr or "bike" in tr: return "🚲"
+    if "piyoda" in tr or "walk" in tr: return "🚶"
+    return "🛵"
+
 def _fee_text(km, fee):
     return f"📏 Masofa: {km:.1f} km\n🚴 Yetkazish haqi (avtomatik): {fee:,} so'm"
 
@@ -1507,7 +1523,7 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # YANGI OYNA: eski to'lov oynasini o'chirib, faqat manzil oynasi qoladi
     try: await q.message.delete()
     except: pass
-    _m = await context.bot.send_message(chat_id=q.from_user.id, text="📍 Manzilingizni yuboring 👇\n\n✅ *Lokatsiya yuborsangiz* - masofa avtomatik hisoblanadi, kuryer haqi kilometrga qarab chiqadi:\n1 km gacha - 8 000 so'm | 1-2 km - 10 000 | 2-5 km - 15 000 | 5-8 km - 20 000 | 8-12 km - 25 000 | 12-20 km - 30 000\n\n✍️ Yoki manzilni yozing (Masalan: Yashil Bozor, 5-uy) - unda do'konning oddiy yetkazish narxi chiqadi.", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📍 Lokatsiya yuborish", request_location=True)]], resize_keyboard=True, one_time_keyboard=True))
+    _m = await context.bot.send_message(chat_id=q.from_user.id, text="📍 Manzilingizni yuboring 👇\n\n✅ *Lokatsiya yuborsangiz* - masofa + kuryer transportiga qarab haq avtomatik chiqadi.\n\nStandart (🛵 Moped): 1 km gacha - 8 000 | 1-2 km - 10 000 | 2-5 km - 15 000 | 5-8 km - 20 000 | 8-12 km - 25 000 | 12-20 km - 30 000\n\n🚗 Mashina bo'lsa - shu narxdan +50% (benzin/gaz uchun)\n🚲 Velosiped bo'lsa - 20% arzonroq\n🚶 Piyoda bo'lsa - 40% arzonroq\n\nMisol, 2-5 km: 🛵 15 000 | 🚗 22 500 | 🚲 12 000 | 🚶 9 000\n\n✍️ Yoki manzilni yozing - unda do'konning oddiy yetkazish narxi chiqadi.", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📍 Lokatsiya yuborish", request_location=True)]], resize_keyboard=True, one_time_keyboard=True))
     context.user_data["panel_msg_id"] = _m.message_id
 async def on_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.contact:
@@ -1775,11 +1791,31 @@ async def courier_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ANTI-NAYRANG: o'z buyurtmang ro'yxatda ko'rinmaydi - olib ketmasin deb
     orders = [o for o in DB["orders"].values() if o["status"] == "to_courier" and o.get("user_id") != q.from_user.id]
     if not orders: await courier_new(q, context, "Hozircha bo'sh buyurtma yo'q.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]])); return
+    _me = DB["users"].get(str(q.from_user.id), {})
+    _my_tr = _me.get("courier_transport", "🛵 Moped / Skuter")
     kb = []
     for o in orders:
-        kb.append([InlineKeyboardButton(f"#{o['id']} | {DB['restaurants'][o['cafe']]['name']} | {o['total']} so'm | {o['address'][:30]}", callback_data=f"take_{o['id']}")])
+        _shop_nm = (DB["restaurants"].get(o["cafe"]) or DB.get("groceries", {}).get(o["cafe"], {})).get("name", "?")
+        _my_fee = _fee_by_transport(o.get("delivery_fee", 15000), _my_tr)
+        _km_txt = f" | 📏 {o.get('distance_km')} km" if o.get("distance_km") else ""
+        kb.append([InlineKeyboardButton(f"#{o['id']} | {_shop_nm} | Jami {o['total']} so'm | Sizga {_my_fee:,} so'm{_km_txt} | {o['address'][:25]}", callback_data=f"take_{o['id']}")])
     kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")])
-    await courier_new(q, context, "📦 Bo'sh buyurtmalar:", reply_markup=InlineKeyboardMarkup(kb))
+    await courier_new(q, context, f"📦 Bo'sh buyurtmalar:\n\n{_transport_emoji(_my_tr)} Sizning transportingiz: {_my_tr}\nSizga ko'rsatilgan haq - aynan sizning transportingiz bo'yicha hisoblangan.\n\n🚗 Mashina - qimmatroq (benzin) | 🚲 Velosiped - arzonroq | 🛵 Moped - standart", reply_markup=InlineKeyboardMarkup(kb))
+
+
+def _finalize_courier_fee(order, courier_user):
+    # Kuryer buyurtmani olganda - uning transportiga qarab yakuniy haqni hisoblaymiz
+    if order.get("fee_finalized"): return None, order.get("delivery_fee", 15000)
+    _old_fee = int(order.get("delivery_fee", 15000))
+    _tr = courier_user.get("courier_transport", "🛵 Moped / Skuter")
+    _new_fee = _fee_by_transport(_old_fee, _tr)
+    if _new_fee != _old_fee:
+        order["delivery_fee"] = _new_fee
+        order["total"] = int(order.get("food_total", order.get("total", 0) - _old_fee)) + _new_fee
+        order["courier_transport"] = _tr
+    order["fee_finalized"] = True
+    order["courier_transport"] = _tr
+    return (_old_fee, _new_fee) if _new_fee != _old_fee else (None, _new_fee)
 
 async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -1809,8 +1845,12 @@ async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try: await context.bot.send_message(chat_id=q.from_user.id, text="⛔ Buyurtma olish uchun avval kiring:\n\nBotda /start bosing → Kuryer panelim → login + parolni yozing.")
             except: pass
             return
-        order["status"] = "taken"; order["courier_id"] = q.from_user.id; order["courier_name"] = q.from_user.first_name; save()
+        order["status"] = "taken"; order["courier_id"] = q.from_user.id; order["courier_name"] = q.from_user.first_name
         _u2 = DB["users"][str(q.from_user.id)]
+        _chg, _newfee = _finalize_courier_fee(order, _u2); save()
+        if _chg:
+            try: await context.bot.send_message(chat_id=order["user_id"], text=f"ℹ️ Buyurtma #{oid} - yakuniy yetkazish haqi aniqlandi!\n\n{_transport_emoji(_u2.get('courier_transport',''))} Kuryer transporti: {_u2.get('courier_transport')}\n📏 Masofa: {order.get('distance_km','-')} km\n🚴 Yetkazish haqi: {_chg:,} → {_newfee:,} so'm\n💰 Yangi JAMI: {order['total']:,} so'm")
+            except: pass
         # 1) Kanaldagi postni "OLINDI" ga almashtiramiz - tugma yo'qoladi, boshqa kuryer bosolmaydi
         try: await context.bot.edit_message_text(chat_id=q.message.chat.id, message_id=q.message.message_id, text=f"✅ BUYURTMA #{oid} OLINDI!\n\n🚴 Kuryer: {q.from_user.first_name}\n🏪 {DB['restaurants'][order['cafe']]['name']}\n💰 {order['total']} so'm")
         except: pass
@@ -1853,7 +1893,12 @@ async def courier_take(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try: await context.bot.send_message(chat_id=q.from_user.id, text="⛔ Buyurtma olish uchun avval kiring:\n\nBotda /start bosing → Kuryer panelim → login + parolni yozing.")
         except: pass
         return
-    order["status"] = "taken"; order["courier_id"] = q.from_user.id; order["courier_name"] = q.from_user.first_name; save()
+    order["status"] = "taken"; order["courier_id"] = q.from_user.id; order["courier_name"] = q.from_user.first_name
+    _u_take2 = DB["users"][str(q.from_user.id)]
+    _chg2, _newfee2 = _finalize_courier_fee(order, _u_take2); save()
+    if _chg2:
+        try: await context.bot.send_message(chat_id=order["user_id"], text=f"ℹ️ Buyurtma #{oid} - yakuniy yetkazish haqi aniqlandi!\n\n{_transport_emoji(_u_take2.get('courier_transport',''))} Kuryer transporti: {_u_take2.get('courier_transport')}\n📏 Masofa: {order.get('distance_km','-')} km\n🚴 Yetkazish haqi: {_chg2:,} → {_newfee2:,} so'm\n💰 Yangi JAMI: {order['total']:,} so'm")
+        except: pass
     # Kanaldagi e'lonni "OLINDI" deb yangilaymiz - boshqa kuryerlar bosib qotib qolmasin
     _ch_mid = order.get("channel_msg_id")
     if _ch_mid:
