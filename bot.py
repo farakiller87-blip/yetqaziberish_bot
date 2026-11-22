@@ -76,7 +76,6 @@ def main_kb(role):
             [InlineKeyboardButton("📦 Bo'sh buyurtmalar", callback_data="courier_list")],
             [InlineKeyboardButton("🚴 Mening buyurtmam", callback_data="courier_my")],
             [InlineKeyboardButton("💰 Mening hisobim", callback_data="courier_balance_new")],
-            [InlineKeyboardButton("🔄 Rolni o'zgartirish", callback_data="change_role")]
         ])
     if role == "restaurant":
         return InlineKeyboardMarkup([
@@ -84,7 +83,6 @@ def main_kb(role):
             [InlineKeyboardButton("📦 Yangi buyurtmalar", callback_data="rest_orders")],
             [InlineKeyboardButton("🍔 Menyuni boshqarish", callback_data="rest_menu")],
             [InlineKeyboardButton("📊 Bugungi statistika", callback_data="rest_stats_new")],
-            [InlineKeyboardButton("🔄 Rolni o'zgartirish", callback_data="change_role")]
         ])
     if role == "admin":
         return InlineKeyboardMarkup([
@@ -93,7 +91,6 @@ def main_kb(role):
             [InlineKeyboardButton("🚴 Kuryerlar", callback_data="admin_couriers")],
             [InlineKeyboardButton("👥 Mijozlar", callback_data="admin_users")],
             [InlineKeyboardButton("📊 Statistika", callback_data="admin_stats")],
-            [InlineKeyboardButton("🔄 Rolni o'zgartirish", callback_data="change_role")]
         ])
     # mijoz
     return InlineKeyboardMarkup([
@@ -101,7 +98,6 @@ def main_kb(role):
         [InlineKeyboardButton("📦 Mening buyurtmalarim", callback_data="client_my")],
         [InlineKeyboardButton("🏪 Restoran sifatida ro'yxatdan o'tish", callback_data="register_rest")],
         [InlineKeyboardButton("🚴 Kuryer sifatida ro'yxatdan o'tish", callback_data="register_courier")],
-        [InlineKeyboardButton("🔄 Rolni o'zgartirish", callback_data="change_role")]
     ])
 
 async def show_main(update, user_id, text="Asosiy menyu:"):
@@ -130,12 +126,36 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🏪 Restoran sifatida", callback_data="setrole_restaurant")],
         ]))
         return
-    await show_main(update, update.effective_user.id, f"Salom {u['name']}! 👋\n\nHozirgi roling: {u['role']}\nTanla:")
+    await show_main(update, update.effective_user.id, f"Salom {u['name']}! 👋\n\nSizning rolingiz: {u['role']} 🔒")
 
 async def set_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     role = q.data.replace("setrole_", "")
     uid = str(q.from_user.id)
+    # SUPER ADMIN - hammasiga o'ta oladi
+    if q.from_user.id == SUPER_ADMIN:
+        DB["users"][uid]["role"] = role; save()
+        await show_main(update, q.from_user.id, f"Rol o'zgardi: {role} ✅")
+        return
+    # QULF: oddiy odam faqat o'zi ro'yxatdan o'tgan rolga o'ta oladi
+    u = DB["users"].get(uid, {})
+    has_rest = any(v.get("admin") == q.from_user.id for v in DB["restaurants"].values())
+    has_courier = bool(u.get("courier_registered"))
+    allowed = False
+    if role == "client": allowed = True  # hamma mijoz bo'la oladi
+    if role == "restaurant" and has_rest: allowed = True
+    if role == "courier" and has_courier: allowed = True
+    if role == "admin": allowed = False
+    if not allowed:
+        if role == "restaurant":
+            await q.edit_message_text("❌ Siz restoran sifatida ro'yxatdan o'tmagansiz.\n\nAvval restoran sifatida ro'yxatdan o'ting, keyin panelga kirasiz.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏪 Restoran sifatida ro'yxatdan o'tish", callback_data="register_rest")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+        elif role == "courier":
+            await q.edit_message_text("❌ Siz kuryer sifatida ro'yxatdan o'tmagansiz.\n\nAvval kuryer sifatida ro'yxatdan o'ting.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚴 Kuryer sifatida ro'yxatdan o'tish", callback_data="register_courier")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+        else:
+            await q.answer("Bu rol sizda yo'q", show_alert=True)
+        return
     DB["users"][uid]["role"] = role; save()
     await show_main(update, q.from_user.id, f"Rol o'zgardi: {role} ✅")
 
@@ -149,13 +169,15 @@ async def change_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🚴 Kuryer", callback_data="setrole_courier")],
             [InlineKeyboardButton("🏪 Restoran", callback_data="setrole_restaurant")],
         ])); return
-    await q.edit_message_text("Rolingni tanla:", reply_markup=InlineKeyboardMarkup([
-        [InlineKeyboardButton("🍔 Mijoz", callback_data="setrole_client")],
-        [InlineKeyboardButton("🚴 Kuryer", callback_data="setrole_courier")],
-        [InlineKeyboardButton("🏪 Restoran egasi", callback_data="setrole_restaurant")],
-        [InlineKeyboardButton("➕ Yangi restoran ro'yxatdan o'tkazish", callback_data="register_rest")],
-        [InlineKeyboardButton("🚴 Kuryer bo'lib ro'yxatdan o'tish", callback_data="register_courier")],
-    ]))
+    # ROL QULFLANGAN: bevosita rol almashtirib bo'lmaydi - faqat qayta ro'yxatdan o'tish orqali
+    cur = DB["users"].get(str(uid), {}).get("role", "client")
+    await q.edit_message_text(f"🔒 Rolsiz qulflangan: {cur}\n\nRolni bevosita o'zgartirib bo'lmaydi.\nBoshqa rolga o'tmoqchi bo'lsangiz - o'sha rol sifatida qaytadan ro'yxatdan o'ting:",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🏪 Restoran sifatida ro'yxatdan o'tish", callback_data="register_rest")],
+            [InlineKeyboardButton("🚴 Kuryer sifatida ro'yxatdan o'tish", callback_data="register_courier")],
+            [InlineKeyboardButton("🍔 Mijoz sifatida davom etish", callback_data="setrole_client")],
+            [InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")],
+        ]))
 
 
 
@@ -175,7 +197,7 @@ async def register_rest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if my:
         names = ", ".join([DB["restaurants"][k]["name"] for k in my])
         await q.edit_message_text(f"✅ Sizda allaqachon restoran bor: {names}\n\nUni boshqarish uchun Rolni o'zgartirish -> Restoran ni tanlang.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏪 Restoran panelimga kirish", callback_data="setrole_restaurant")],[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
         return
     context.user_data["step"] = "reg_name"
     context.user_data["reg"] = {}
@@ -257,7 +279,7 @@ async def finish_reg_with_phone(update: Update, context: ContextTypes.DEFAULT_TY
     DB["users"][str(uid)]["role"] = "restaurant"; save()
     context.user_data["step"] = None
     context.user_data.pop("reg", None)
-    await update.message.reply_text(f"🎉 *Tabriklaymiz! Restoraningiz ro'yxatdan o'tdi!*\n\n🏪 {reg['name']}\n🍔 {len(reg.get('menu',{}))} ta taom\n🚚 Yetkazish: {reg.get('delivery',15000):,} so'm\n\nEndi mijozlar sizni ro'yxatda ko'radi. Buyurtma tushsa shu yerga keladi.\nMenyuni o'zgartirish uchun: Rolni o'zgartirish -> Restoran",
+    await update.message.reply_text(f"🎉 *Tabriklaymiz! Restoraningiz ro'yxatdan o'tdi!*\n\n🏪 {reg['name']}\n🍔 {len(reg.get('menu',{}))} ta taom\n🚚 Yetkazish: {reg.get('delivery',15000):,} so'm\n\nEndi mijozlar sizni ro'yxatda ko'radi. Buyurtma tushsa shu yerga keladi.\nMenyuni o'zgartirish uchun: Restoran panelingizni oching",
         parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏪 Restoran panelim", callback_data="setrole_restaurant")]]))
     # Super adminga xabar
     try: await context.bot.send_message(chat_id=SUPER_ADMIN, text=f"🆕 Yangi restoran ro'yxatdan o'tdi!\n🏪 {reg['name']}\n👤 {update.effective_user.first_name} | ID: {uid}\n📞 {DB['users'].get(str(uid),{}).get('phone','')}")
@@ -728,6 +750,15 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action, oid = q.data.split("_"); oid = str(oid)
     order = DB["orders"].get(oid)
     if not order: await q.answer("Topilmadi"); return
+    # QULF: allaqachon qabul qilingan / rad etilgan bo'lsa - 2-marta yubormaymiz
+    if action == "accept" and order.get("status") in ("to_courier", "taken", "done"):
+        await q.answer("Bu buyurtma allaqachon qabul qilingan ✅")
+        await _edit_q(q, f"✅ Buyurtma #{oid} allaqachon qabul qilingan. Kuryerlarga yuborilgan.")
+        return
+    if action == "reject" and order.get("status") in ("rejected", "to_courier", "taken", "done"):
+        await q.answer("Bu buyurtma allaqachon ko'rib chiqilgan")
+        await _edit_q(q, f"Buyurtma #{oid} allaqachon ko'rib chiqilgan.")
+        return
     # Agar buyurtma allaqachon qabul qilingan bo'lsa - yana bir marta bosganda ham ishlasin
     if action == "reject":
         order["status"] = "rejected"; save()
@@ -921,7 +952,7 @@ async def main():
     print("Yandex-style bot ishga tushdi...")
     await app.initialize()
     await app.start()
-    await app.updater.start_polling()
+    await app.updater.start_polling(drop_pending_updates=True)
     # Botni to'xtamasdan ushlab turamiz
     await asyncio.Event().wait()
 
