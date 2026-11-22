@@ -2338,7 +2338,8 @@ async def generic_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
     elif q.data in ["admin_orders","rest_orders"]:
         if q.data == "admin_orders" and q.from_user.id != SUPER_ADMIN: await q.answer("Faqat admin", show_alert=True); return
-        _is_admin = q.from_user.id == SUPER_ADMIN
+        _cur_role = DB.get("users", {}).get(str(q.from_user.id), {}).get("role")
+        _is_admin = (q.from_user.id == SUPER_ADMIN and _cur_role == "admin")
         _my_rest_keys = [k for k,v in DB["restaurants"].items() if v.get("admin")==q.from_user.id]
         _my_groc_keys = [k for k,v in DB.get("groceries", {}).items() if v.get("admin")==q.from_user.id]
         if _is_admin:
@@ -2469,6 +2470,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(groc_photo_pick, pattern="^groc_photo_"))
     app.add_handler(CallbackQueryHandler(groc_price_list, pattern="^groc_price_list$"))
     app.add_handler(CallbackQueryHandler(groc_price_ask, pattern="^groc_price_"))
+    app.add_handler(CallbackQueryHandler(groc_menu_manage, pattern="^groc_menu_manage$"))
     app.add_handler(CallbackQueryHandler(groc_menu_manage, pattern="^groc_menu$"))
     app.add_handler(CallbackQueryHandler(groc_toggle_item, pattern="^groc_toggle_"))
     app.add_handler(CallbackQueryHandler(groc_delivery_ask, pattern="^groc_delivery$"))
@@ -2536,4 +2538,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
