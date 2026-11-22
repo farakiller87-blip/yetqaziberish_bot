@@ -2327,7 +2327,9 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def generic_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
-    if q.data == "back_main": await show_main(update, q.from_user.id)
+    if q.data == "rest_list": await rest_list(update, context); return
+    elif q.data == "groc_list": await groc_list(update, context); return
+    elif q.data == "back_main": await show_main(update, q.from_user.id)
     elif q.data == "client_order": await client_order(update, context)
     elif q.data == "courier_my":
         oid_list = [o for o in DB["orders"].values() if o.get("courier_id") == q.from_user.id and o["status"] == "taken"]
@@ -2534,7 +2536,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(admin_rest_pay_ask, pattern="^restpay_"))
     app.add_handler(CallbackQueryHandler(admin_rest_pay_ok, pattern="^restpayok_"))
     app.add_handler(CallbackQueryHandler(admin_topups_info, pattern="^admin_topups_info$"))
-    app.add_handler(CallbackQueryHandler(generic_back, pattern="^(back_main|client_my|courier_my|courier_balance|admin_orders|rest_orders|admin_couriers|admin_users|admin_rests|admin_grocs|rest_menu|rest_stats)$"))
+    app.add_handler(CallbackQueryHandler(generic_back, pattern="^(back_main|client_my|courier_my|courier_balance|admin_orders|rest_orders|admin_couriers|admin_users|admin_rests|admin_grocs|rest_menu|rest_stats|rest_list|groc_list)$"))
     # CATCH-ALL: hech qaysi handlerga tushmagan tugma - jim turmasin, sababini aytsin
     async def _unmatched_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         q = update.callback_query
