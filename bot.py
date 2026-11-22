@@ -409,7 +409,7 @@ def _my_rest(uid):
 async def rest_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     _u_rp = DB["users"].get(str(q.from_user.id), {})
-    if _u_rp.get("locked_role") and _u_rp.get("locked_role") != "restaurant":
+    if q.from_user.id != SUPER_ADMIN and _u_rp.get("locked_role") and _u_rp.get("locked_role") != "restaurant":
         await send_new_window(update, context, locked_msg(_u_rp.get("locked_role")), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="back_main")]]))
         return
     key, r = _my_rest(q.from_user.id)
@@ -2344,6 +2344,10 @@ async def generic_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _my_groc_keys = [k for k,v in DB.get("groceries", {}).items() if v.get("admin")==q.from_user.id]
         if _is_admin:
             _ords = list(DB["orders"].values())[-10:]; _back = [[InlineKeyboardButton("⬅️ Admin panel", callback_data="admin_panel")]]; _title = "📦 *Oxirgi buyurtmalar (hammasi):*"
+        elif _cur_role == "grocery":
+            _ords = [o for o in DB["orders"].values() if o.get("cafe") in _my_groc_keys][-10:]; _back = [[InlineKeyboardButton("🛒 Do'kon paneliga qaytish", callback_data="groc_panel")]]; _title = "📦 *Sening do'koning buyurtmalari:*"
+        elif _cur_role == "restaurant":
+            _ords = [o for o in DB["orders"].values() if o.get("cafe") in _my_rest_keys][-10:]; _back = [[InlineKeyboardButton("🏪 Restoran paneliga qaytish", callback_data="rest_panel")]]; _title = "📦 *Sening restoraning buyurtmalari:*"
         elif _my_groc_keys:
             _ords = [o for o in DB["orders"].values() if o.get("cafe") in _my_groc_keys][-10:]; _back = [[InlineKeyboardButton("🛒 Do'kon paneliga qaytish", callback_data="groc_panel")]]; _title = "📦 *Sening do'koning buyurtmalari:*"
         elif _my_rest_keys:
