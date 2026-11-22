@@ -419,6 +419,7 @@ async def rest_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📸 Taomga rasm qo'shish", callback_data="rest_photo_ask")],
         [InlineKeyboardButton("💰 Narxni o'zgartirish", callback_data="rest_price_list")],
         [InlineKeyboardButton("❌ Tugadi / Bor qilish", callback_data="rest_menu")],
+        [InlineKeyboardButton("📍 Restoran joylashuvim (xarita)", callback_data="rest_loc")],
         [InlineKeyboardButton("🚚 Yetkazish narxini o'zgartirish", callback_data="rest_delivery")],
         [InlineKeyboardButton("💳 Payme / Click karta raqamim", callback_data="rest_card")],
         [InlineKeyboardButton("🟢 Ochiq / 🔴 Yopiq", callback_data="rest_open")],
@@ -1020,6 +1021,29 @@ def _cart_text(cart):
     total = sum(pr for _, pr in cart)
     return "🛒 *SAVATINGIZ:*\n" + "\n".join(lines) + f"\n\n📦 Jami taom: {len(cart)} ta\n💰 Jami summa: {total:,} so'm"
 
+import math
+def _haversine_km(lat1, lon1, lat2, lon2):
+    try:
+        R = 6371.0
+        dlat = math.radians(float(lat2)-float(lat1)); dlon = math.radians(float(lon2)-float(lon1))
+        a = math.sin(dlat/2)**2 + math.cos(math.radians(float(lat1)))*math.cos(math.radians(float(lat2)))*math.sin(dlon/2)**2
+        return 2*R*math.asin(math.sqrt(a))
+    except: return None
+
+def _fee_by_km(km):
+    # TERMIZ TARIFI - Super Admin xohlasa o'zgartiradi
+    if km is None: return None
+    if km <= 1: return 8000
+    if km <= 2: return 10000
+    if km <= 5: return 15000
+    if km <= 8: return 20000
+    if km <= 12: return 25000
+    if km <= 20: return 30000
+    return 30000 + int((km-20)*1000)  # 20 km dan keyin har 1 km ga +1000
+
+def _fee_text(km, fee):
+    return f"📏 Masofa: {km:.1f} km\n🚴 Yetkazish haqi (avtomatik): {fee:,} so'm"
+
 def _dish_emoji(name: str) -> str:
     n = name.lower()
     if "osh" in n or "palov" in n: return "🍚"
@@ -1479,10 +1503,11 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         context.user_data["payment"] = "Click 💳"
     context.user_data["step"] = "address"
+    context.user_data["delivery_fee_override"] = None; context.user_data["client_km"] = None; context.user_data["client_lat"] = None; context.user_data["client_lon"] = None
     # YANGI OYNA: eski to'lov oynasini o'chirib, faqat manzil oynasi qoladi
     try: await q.message.delete()
     except: pass
-    _m = await context.bot.send_message(chat_id=q.from_user.id, text="📍 Manzilingizni yozing (Masalan: Yashil Bozor, 5-uy):", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📍 Lokatsiya yuborish", request_location=True)]], resize_keyboard=True, one_time_keyboard=True))
+    _m = await context.bot.send_message(chat_id=q.from_user.id, text="📍 Manzilingizni yuboring 👇\n\n✅ *Lokatsiya yuborsangiz* - masofa avtomatik hisoblanadi, kuryer haqi kilometrga qarab chiqadi:\n1 km gacha - 8 000 so'm | 1-2 km - 10 000 | 2-5 km - 15 000 | 5-8 km - 20 000 | 8-12 km - 25 000 | 12-20 km - 30 000\n\n✍️ Yoki manzilni yozing (Masalan: Yashil Bozor, 5-uy) - unda do'konning oddiy yetkazish narxi chiqadi.", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📍 Lokatsiya yuborish", request_location=True)]], resize_keyboard=True, one_time_keyboard=True))
     context.user_data["panel_msg_id"] = _m.message_id
 async def on_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.contact:
@@ -1543,7 +1568,12 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: pass
     cart = context.user_data.get("cart", []); cafe_key = context.user_data.get("cafe")
     _sub = sum(p for _, p in cart)
-    _del = DB["restaurants"][cafe_key].get("delivery", 15000)
+    _shop2 = DB["restaurants"].get(cafe_key) or DB.get("groceries", {}).get(cafe_key, {})
+    # AVTOMATIK TARIF: mijoz lokatsiya yuborgan bo'lsa - kilometrga qarab hisoblangan narx ishlaydi, bo'lmasa do'konning oddiy narxi
+    if context.user_data.get("delivery_fee_override"):
+        _del = int(context.user_data["delivery_fee_override"])
+    else:
+        _del = _shop2.get("delivery", 15000)
     # 100 000 dan oshsa ham bepul emas - _del o'zgarmaydi, yetkazish har doim pullik!
     total = _sub + _del
     # NAQD = HISOBDAN: mijoz Naqd tanlagan bo'lsa - pul avval hisobdan yechiladi, hisobda yetmasa buyurtma ketmaydi
@@ -1574,11 +1604,12 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # YANGI QOIDA: Super Admin pulga aralashmaydi - hech kim Super Adminga qarz yozmaydi. Hamma pul RESTORANGA boradi.
     _rest_owed = 0
     _is_groc = cafe_key in DB.get("groceries", {})
-    DB["orders"][str(oid)] = {"id": oid, "cafe": cafe_key, "shop_type": "grocery" if _is_groc else "restaurant", "cart": cart, "total": total, "food_total": _sub, "delivery_fee": _del, "payment": payment, "user_id": int(uid), "name": DB["users"][uid]["name"], "phone": DB["users"][uid].get("phone",""), "address": address, "status": "waiting", "courier_id": None, "created": "now", "rest_owed": _rest_owed, "rest_paid": False}
+    DB["orders"][str(oid)] = {"id": oid, "cafe": cafe_key, "shop_type": "grocery" if _is_groc else "restaurant", "cart": cart, "total": total, "food_total": _sub, "delivery_fee": _del, "payment": payment, "user_id": int(uid), "name": DB["users"][uid]["name"], "phone": DB["users"][uid].get("phone",""), "address": address, "status": "waiting", "courier_id": None, "created": "now", "rest_owed": _rest_owed, "rest_paid": False, "distance_km": context.user_data.get("client_km"), "client_lat": context.user_data.get("client_lat"), "client_lon": context.user_data.get("client_lon"), "auto_fee": bool(context.user_data.get("delivery_fee_override"))}
     save()
     context.user_data["step"] = None
     r = DB["restaurants"].get(cafe_key) or DB.get("groceries", {}).get(cafe_key, {})
-    text = f"🔥 YANGI BUYURTMA #{oid}!\n\n{'🛒' if _is_groc else '🏪'} {r['name']}\n👤 {DB['users'][uid]['name']} | 📞 {DB['users'][uid].get('phone')}\n📍 {address}\n"
+    _km_txt = f"\n📏 Masofa: {context.user_data.get('client_km')} km (avtomatik) | 🚴 Kuryer haqi: {_del:,} so'm" if context.user_data.get("client_km") else f"\n🚴 Yetkazish: {_del:,} so'm (oddiy narx)"
+    text = f"🔥 YANGI BUYURTMA #{oid}!\n\n{'🛒' if _is_groc else '🏪'} {r['name']}{_km_txt}\n👤 {DB['users'][uid]['name']} | 📞 {DB['users'][uid].get('phone')}\n📍 {address}\n"
     for n, pr, qty, sub in _group_cart(cart):
         if qty > 1: text += f"🛒 {n} x{qty} - {sub:,} so'm\n"
         else: text += f"🛒 {n} - {pr:,} so'm\n"
@@ -2170,6 +2201,29 @@ async def on_location(update, context):
     if not update.message.location:
         return
     loc = update.message.location
+    _step = context.user_data.get("step")
+    # RESTORAN JOYLASHUVI
+    if _step == "rest_loc_val":
+        key, r = _my_rest(update.effective_user.id)
+        if r: r["lat"] = loc.latitude; r["lon"] = loc.longitude; save(); context.user_data["step"] = None; await update.message.reply_text(f"✅ Restoran joylashuvi saqlandi!\n📍 {loc.latitude:.5f}, {loc.longitude:.5f}\n\nEndi mijoz lokatsiya yuborsa - masofa avtomatik hisoblanadi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏪 Panelga qaytish", callback_data="rest_panel")]])); return
+    # DO'KON JOYLASHUVI
+    if _step == "groc_loc_val":
+        key, r = _my_groc(update.effective_user.id)
+        if r: r["lat"] = loc.latitude; r["lon"] = loc.longitude; save(); context.user_data["step"] = None; await update.message.reply_text(f"✅ Do'kon joylashuvi saqlandi!\n📍 {loc.latitude:.5f}, {loc.longitude:.5f}\n\nEndi mijoz lokatsiya yuborsa - masofa avtomatik hisoblanadi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Panelga qaytish", callback_data="groc_panel")]])); return
+    # MIJOZ - MANZIL O'RNIGA LOKATSIYA YUBORDI: masofa + avtomatik tarif
+    if _step == "address":
+        _ck = context.user_data.get("cafe")
+        _shop = DB["restaurants"].get(_ck) or DB.get("groceries", {}).get(_ck, {}) if _ck else {}
+        _slat, _slon = _shop.get("lat"), _shop.get("lon")
+        if _slat and _slon:
+            _km = _haversine_km(_slat, _slon, loc.latitude, loc.longitude)
+            _fee = _fee_by_km(_km)
+            context.user_data["delivery_fee_override"] = _fee; context.user_data["client_lat"] = loc.latitude; context.user_data["client_lon"] = loc.longitude; context.user_data["client_km"] = round(_km, 1)
+            await update.message.reply_text(f"✅ Lokatsiyangiz qabul qilindi!\n\n{_fee_text(_km, _fee)}\n\nEndi manzilni yozing (uy, ko'cha, orientir):\nMasalan: Yashil Bozor, 5-uy, 12-xonadon", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("❌ Bekor qilish", callback_data="back_main")]], resize_keyboard=True))
+            return
+        else:
+            await update.message.reply_text("⚠️ Do'kon/restoran hali o'z joylashuvini kiritmagan.\nManzilni yozing - oddiy yetkazish narxi chiqadi:\nMasalan: Yashil Bozor, 5-uy")
+            return
     # === KURYERNI XARITADA KUZATISH ===
     # Agar lokatsiyani kuryer yuborgan bo'lsa va uning olib ketgan buyurtmasi bo'lsa - mijozga yuboramiz
     _uid = str(update.effective_user.id)
@@ -2220,6 +2274,8 @@ async def main():
     app.add_handler(CallbackQueryHandler(rest_photo_pick, pattern="^rest_photo_"))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     app.add_handler(CallbackQueryHandler(rest_delivery_ask, pattern="^rest_delivery$"))
+    app.add_handler(CallbackQueryHandler(rest_loc_ask, pattern="^rest_loc$"))
+    app.add_handler(CallbackQueryHandler(groc_loc_ask, pattern="^groc_loc$"))
     app.add_handler(CallbackQueryHandler(rest_open_toggle, pattern="^rest_open$"))
     app.add_handler(CallbackQueryHandler(rest_stats_new, pattern="^rest_stats_new$"))
     app.add_handler(CallbackQueryHandler(rest_card_ask, pattern="^rest_card$"))
